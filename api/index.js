@@ -9,9 +9,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const HYPERBEAM_API_KEY = process.env.HYPERBEAM_API_KEY;
 
-if (!HYPERBEAM_API_KEY) {
-  console.error("CRITICAL: HYPERBEAM_API_KEY is missing from .env");
-  process.exit(1);
+if (!HYPERBEAM_API_KEY && !process.env.VERCEL) {
+  console.warn("WARNING: HYPERBEAM_API_KEY is missing from environment. API will fail.");
 }
 
 app.use(cors());
@@ -43,6 +42,9 @@ const hyperbeamClient = axios.create({
 
 // Create a new room / Virtual Machine
 app.post('/api/room/create', async (req, res) => {
+  if (!HYPERBEAM_API_KEY) {
+    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing in Vercel settings.' });
+  }
   try {
     const { userId, userName } = req.body || {};
     
@@ -91,6 +93,9 @@ app.post('/api/room/create', async (req, res) => {
 
 // Retrieve embed URL for an existing room
 app.get('/api/room/:id', async (req, res) => {
+  if (!HYPERBEAM_API_KEY) {
+    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing in Vercel settings.' });
+  }
   try {
     const { id } = req.params;
     
