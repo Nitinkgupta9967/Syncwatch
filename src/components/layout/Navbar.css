@@ -1,0 +1,77 @@
+.sync-navbar {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 1200px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+}
+
+.sync-navbar-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.sync-navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sync-navbar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background-color: rgba(155, 137, 255, 0.1);
+  border-radius: 50%;
+}
+
+.sync-navbar-title {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+.sync-navbar-links {
+  display: flex;
+  gap: 32px;
+}
+
+.sync-nav-link {
+  font-weight: 500;
+  color: var(--color-text-main);
+  transition: color var(--transition-fast);
+}
+
+.sync-nav-link:hover {
+  color: var(--color-primary);
+}
+
+.sync-navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .sync-navbar {
+    top: 0;
+    width: 100%;
+    border-radius: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  }
+  
+  .sync-navbar-links {
+    display: none;
+  }
+}
