@@ -1,9 +1,13 @@
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import 'dotenv/config';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,6 +22,12 @@ app.use(express.json());
 
 // Simplistic db.json setup - Using /tmp/ for Vercel Serverless compatibility
 const DB_FILE = process.env.VERCEL ? path.join('/tmp', 'db.json') : path.join(__dirname, 'db.json');
+console.log("DB_FILE Path:", DB_FILE);
+
+// Health check to verify API is alive
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString(), vercel: !!process.env.VERCEL });
+});
 
 // Helper functions for reading/writing our JSON database
 function readDB() {
@@ -153,9 +163,10 @@ app.post('/api/rooms/:roomId/messages', (req, res) => {
 });
 
 // Export the app for Vercel Serverless execution
-if (process.env.VERCEL) {
-  module.exports = app;
-} else {
+export default app;
+
+// Listen locally if not in Vercel
+if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`SyncAnime Auth Backend running on http://localhost:${PORT}`);
   });
