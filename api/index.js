@@ -76,7 +76,7 @@ app.post('/api/room/create', async (req, res) => {
         id: roomId,
         userId, // Creator is the host
         hostId: userId,
-        name: `${userName || 'User'}'s Watch Party`,
+        name: `${userName || 'User'}'s Anime Party`,
         code: roomId,
         participantsCount: 1,
         activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
@@ -173,7 +173,8 @@ app.post('/api/rooms/:roomId/heartbeat', (req, res) => {
 
   if (pIndex > -1) {
     room.activeParticipants[pIndex].lastSeen = now;
-    room.activeParticipants[pIndex].userName = userName; // update just in case
+    room.activeParticipants[pIndex].userName = userName; 
+    room.activeParticipants[pIndex].isHost = room.hostId === userId; // Ensure host status is correct
   } else {
     room.activeParticipants.push({ 
       userId, 

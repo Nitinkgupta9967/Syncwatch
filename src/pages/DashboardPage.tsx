@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Play, Plus, History, Users } from 'lucide-react';
+import { Plus, History, Users, Home, Settings, LogOut, Menu, X, Search } from 'lucide-react';
 import './DashboardPage.css';
 
 export const DashboardPage: React.FC = () => {
@@ -10,6 +10,7 @@ export const DashboardPage: React.FC = () => {
   const [joinCode, setJoinCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [previousRooms, setPreviousRooms] = useState<any[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const API_URL = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
@@ -19,11 +20,10 @@ export const DashboardPage: React.FC = () => {
       try {
         const res = await fetch(`${API_URL}/api/users/${user.uid}/rooms`);
         const data = await res.json();
-        const fetchedRooms = data.map((room: any) => ({
-          ...room,
-          date: room.createdAt ? new Date(room.createdAt).toLocaleDateString() : 'Just now',
-        }));
-        setPreviousRooms(fetchedRooms);
+        setPreviousRooms(data.map((r: any) => ({
+          ...r,
+          date: r.createdAt ? new Date(r.createdAt).toLocaleDateString() : 'Just now',
+        })));
       } catch (err) {
         console.error("Failed to fetch rooms:", err);
       }
@@ -43,11 +43,8 @@ export const DashboardPage: React.FC = () => {
         })
       });
       const data = await res.json();
-      if (data.roomId) {
-        navigate(`/room/${data.roomId}`);
-      } else {
-        alert('Failed to create room: ' + (data.error || 'Unknown error'));
-      }
+      if (data.roomId) navigate(`/room/${data.roomId}`);
+      else alert('Failed to create room: ' + (data.error || 'Unknown error'));
     } catch (err) {
       alert('Could not connect to server.');
     } finally {
@@ -59,106 +56,113 @@ export const DashboardPage: React.FC = () => {
     e.preventDefault();
     if (joinCode.trim()) {
       let code = joinCode.trim();
-      if (code.includes('/room/')) {
-        code = code.split('/room/').pop() || code;
-      }
+      if (code.includes('/room/')) code = code.split('/room/').pop() || code;
       code = code.split('?')[0].replace(/\/$/, '');
-      if (code) {
-        navigate(`/room/${code}`);
-      }
+      if (code) navigate(`/room/${code}`);
     }
   };
 
   return (
-    <div className="dashboard-page animate-fade-in">
-      <nav className="dashboard-nav">
-        <div className="nav-container">
-          <div className="brand">
-            <div className="logo-circle">
-              <Play size={18} fill="white" color="white" />
-            </div>
-            <span>Syncwatch</span>
+    <div className={`dashboard-layout ${isSidebarOpen ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
+      {/* Sidebar */}
+      <aside className="dashboard-sidebar glass-card">
+        <div className="sidebar-header">
+          <div className="sidebar-logo">
+            <span className="logo-icon">✨</span>
+            <span className="logo-text">SyncAnime</span>
           </div>
-          <div className="nav-profile">
-            <span className="user-email desktop-only">{user?.email}</span>
-            <button className="btn-logout" onClick={logout}>Sign Out</button>
+          <button className="sidebar-toggle" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
+
+        <nav className="sidebar-nav">
+          <button className="nav-item active"><Home size={20} /> <span>Home</span></button>
+          <button className="nav-item" onClick={handleCreateRoom}><Plus size={20} /> <span>Create Room</span></button>
+          <button className="nav-item" onClick={() => navigate('#history')}><History size={20} /> <span>History</span></button>
+          <button className="nav-item"><Settings size={20} /> <span>Settings</span></button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="user-pill glass-card">
+            <div className="user-avatar">{user?.email?.charAt(0).toUpperCase()}</div>
+            <div className="user-info">
+              <p className="u-name">{user?.displayName || 'User'}</p>
+              <p className="u-email">{user?.email}</p>
+            </div>
+            <button className="logout-btn" onClick={logout} title="Sign Out">
+              <LogOut size={18} />
+            </button>
           </div>
         </div>
-      </nav>
-      
-      <main className="dashboard-content">
-        <section className="hero-section">
-          <h1>Welcome back, <span className="text-highlight">{user?.displayName || user?.email?.split('@')[0]}</span></h1>
-          <p>Create a private room to browse and watch synchronized videos with your friends.</p>
-        </section>
+      </aside>
 
-        <section className="main-actions">
-          <div className="action-grid">
-            <button className="action-card primary-action" onClick={handleCreateRoom} disabled={isLoading}>
-              <div className="icon-box">
-                <Plus size={28} />
-              </div>
-              <div className="action-info">
-                <h3>Create Room</h3>
-                <p>Start a new virtual browser session</p>
-              </div>
-              {isLoading && <div className="loading-spinner"></div>}
-            </button>
+      {/* Main Content */}
+      <main className="dashboard-main">
+        <header className="main-header">
+          <div className="search-bar glass-card">
+            <Search size={18} />
+            <input placeholder="Search for rooms or friends..." />
+          </div>
+        </header>
 
-            <div className="action-card secondary-action">
-              <div className="icon-box">
-                <Users size={28} />
-              </div>
-              <div className="action-info">
-                <h3>Join Room</h3>
-                <form onSubmit={handleJoinRoom} className="join-input-group">
-                  <input 
-                    placeholder="Enter code..." 
-                    value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
-                  />
-                  <button type="submit">Join</button>
-                </form>
-              </div>
+        <div className="main-canvas animate-fade-in">
+          <div className="welcome-banner glass-card">
+            <div className="banner-content">
+              <h1>Welcome, <span className="text-highlight">{user?.displayName || user?.email?.split('@')[0]}</span></h1>
+              <p>Host an anime party and watch with friends in sub-second sync.</p>
+              <button className="btn-primary" onClick={handleCreateRoom} disabled={isLoading}>
+                Start New Watch Party <Plus size={20} />
+              </button>
             </div>
-          </div>
-        </section>
-
-        <section className="history-section">
-          <div className="section-header">
-            <h2>Recent Sessions</h2>
-            <span className="session-count">{previousRooms.length} rooms</span>
+            <div className="banner-visual desktop-only">🍿</div>
           </div>
 
-          {previousRooms.length > 0 ? (
-            <div className="room-list">
-              {previousRooms.map((room) => (
-                <div key={room.id} className="room-item" onClick={() => navigate(`/room/${room.code}`)}>
-                  <div className="room-icon">
-                    <History size={20} />
-                  </div>
-                  <div className="room-details">
-                    <h4>{room.name || 'Watch Party'}</h4>
-                    <div className="room-meta">
-                      <span>{room.date}</span>
-                      <span className="dot"></span>
-                      <span>{room.participantsCount || 0} watching</span>
+          <div className="dashboard-grid">
+            <section className="join-section">
+              <div className="card-header">
+                <h3>Join via Code</h3>
+              </div>
+              <form className="join-input-box glass-card" onSubmit={handleJoinRoom}>
+                <input 
+                  placeholder="Paste room link or code..." 
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                />
+                <button type="submit" disabled={!joinCode.trim()}>Join</button>
+              </form>
+            </section>
+
+            <section className="history-section" id="history">
+              <div className="card-header">
+                <h3>Recent Parties</h3>
+                <span>{previousRooms.length} sessions</span>
+              </div>
+
+              <div className="room-history-list">
+                {previousRooms.length > 0 ? (
+                  previousRooms.map((room) => (
+                    <div key={room.id} className="history-card glass-card" onClick={() => navigate(`/room/${room.code}`)}>
+                      <div className="h-card-top">
+                        <div className="h-icon"><Users size={16} /></div>
+                        <span className="h-count">{room.participantsCount || 0} watching</span>
+                      </div>
+                      <h4>{room.name || 'Anime Party'}</h4>
+                      <div className="h-card-footer">
+                        <span>{room.date}</span>
+                        <button className="h-join-btn">Resume</button>
+                      </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="empty-history glass-card">
+                    <p>No parties yet. Time to start one! 🎥</p>
                   </div>
-                  <div className="room-code">
-                    <code>#{room.code.slice(0, 8)}</code>
-                    <Play size={16} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <div className="empty-icon">🛋️</div>
-              <p>No recent rooms found. Start your first party!</p>
-            </div>
-          )}
-        </section>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
       </main>
     </div>
   );

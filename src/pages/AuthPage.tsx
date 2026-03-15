@@ -8,10 +8,7 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { Card } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
-import { Tv, ArrowLeft, Chrome } from 'lucide-react';
+import { ArrowLeft, Chrome } from 'lucide-react';
 import './AuthPage.css';
 
 export const AuthPage: React.FC = () => {
@@ -19,7 +16,6 @@ export const AuthPage: React.FC = () => {
   const isSignupParam = searchParams.get('signup') === 'true';
   const [isSignup, setIsSignup] = useState(isSignupParam);
   
-  // Form State
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,7 +32,6 @@ export const AuthPage: React.FC = () => {
     try {
       if (isSignup) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Only update profile if username is provided
         if (username.trim()) {
            await updateProfile(userCredential.user, { displayName: username });
         }
@@ -69,88 +64,89 @@ export const AuthPage: React.FC = () => {
 
   return (
     <div className="auth-page">
-      <div className="auth-bg-shapes">
-        <div className="shape shape-primary"></div>
-        <div className="shape shape-secondary"></div>
+      <div className="blob-container">
+        <div className="blob blob-1"></div>
+        <div className="blob blob-2"></div>
       </div>
       
       <Link to="/" className="auth-back-link">
-        <ArrowLeft size={20} /> Back to Home
+        <ArrowLeft size={20} /> Home
       </Link>
 
       <div className="auth-container animate-fade-in">
         <div className="auth-brand">
-          <div className="auth-logo">
-            <Tv size={32} color="white" />
+          <div className="auth-logo-box glass-card">
+            <span className="logo-emoji">✨</span>
           </div>
-          <h2 className="auth-title">SyncAnime</h2>
+          <h2 className="auth-title-text">SyncAnime</h2>
         </div>
 
-        <Card glass className="auth-card">
+        <div className="auth-card-wrap glass-card">
           <div className="auth-header">
-            <h3>{isSignup ? 'Create an account' : 'Welcome back'}</h3>
-            <p>{isSignup ? 'Join the community and start watching together.' : 'Log in to access your watch rooms.'}</p>
+            <h3>{isSignup ? 'Start Your Journey' : 'Welcome Back'}</h3>
+            <p>{isSignup ? 'Create an account to host your first party.' : 'Log in to rejoin your anime community.'}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form">
-            {error && <div className="auth-error-message" style={{ color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px' }}>{error}</div>}
+            {error && <div className="auth-error-pill">{error}</div>}
             {isSignup && (
-              <Input 
-                label="Username" 
-                placeholder="e.g. OtakuKing99" 
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required 
-                fullWidth 
-              />
+              <div className="input-group">
+                <label>Username</label>
+                <input 
+                  placeholder="e.g. AnimeFan_99" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required 
+                />
+              </div>
             )}
-            <Input 
-              label="Email" 
-              type="email" 
-              placeholder="you@example.com" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required 
-              fullWidth 
-            />
-            <Input 
-              label="Password" 
-              type="password" 
-              placeholder="••••••••" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required 
-              fullWidth 
-            />
+            <div className="input-group">
+              <label>Email Address</label>
+              <input 
+                type="email" 
+                placeholder="you@email.com" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required 
+              />
+            </div>
+            <div className="input-group">
+              <label>Password</label>
+              <input 
+                type="password" 
+                placeholder="••••••••" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required 
+              />
+            </div>
             
-            <Button type="submit" fullWidth size="lg" disabled={isLoading}>
-              {isLoading ? 'Please wait...' : (isSignup ? 'Sign Up' : 'Log In')}
-            </Button>
+            <button type="submit" className="btn-primary auth-submit" disabled={isLoading}>
+              {isLoading ? 'Processing...' : (isSignup ? 'Create Account' : 'Sign In')}
+            </button>
           </form>
 
           <div className="auth-divider">
-            <span>or continue with</span>
+            <span>or</span>
           </div>
 
-          <div className="auth-social">
-            <Button variant="outline" fullWidth type="button" onClick={handleGoogleLogin} disabled={isLoading}>
-              <Chrome size={18} /> Google
-            </Button>
-          </div>
+          <button className="btn-social glass-card" onClick={handleGoogleLogin} disabled={isLoading}>
+            <Chrome size={20} /> Continue with Google
+          </button>
 
           <div className="auth-footer">
             <p>
-              {isSignup ? 'Already have an account?' : "Don't have an account?"}
+              {isSignup ? 'Already have an account?' : "New to SyncAnime?"}
               <button 
                 type="button" 
-                className="auth-toggle" 
+                className="auth-toggle-btn" 
                 onClick={() => setIsSignup(!isSignup)}
               >
-                {isSignup ? 'Log in here' : 'Sign up for free'}
+                {isSignup ? 'Sign in' : 'Create one for free'}
               </button>
             </p>
           </div>
-        </Card>
+        </div>
       </div>
     </div>
   );

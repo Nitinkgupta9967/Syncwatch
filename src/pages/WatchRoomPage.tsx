@@ -3,8 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Hyperbeam from '@hyperbeam/web';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
-
-import { ArrowLeft, MessageSquare, Send, Copy, Check, Tv } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Send, Copy, Check, Tv, Plus } from 'lucide-react';
 import './WatchRoomPage.css';
 
 export const WatchRoomPage: React.FC = () => {
@@ -178,13 +177,13 @@ export const WatchRoomPage: React.FC = () => {
 
   return (
     <div className={`watch-room-page ${isSidebarOpen ? 'sidebar-open' : ''}`}>
-      <header className="room-header">
+      <header className="room-header animate-fade-in">
         <div className="header-left">
           <button className="icon-btn" onClick={() => navigate('/dashboard')}>
-            <ArrowLeft size={20} />
+            <ArrowLeft size={20} color="white" />
           </button>
           <div className="room-meta-header">
-            <h3>{isHost ? 'Your Watch Party' : "Watching Party"}</h3>
+            <h3>{isHost ? 'SyncAnime Host' : "SyncAnime Party"}</h3>
             <div className="status-badge">
               <span className="pulse"></span>
               {activeParticipants.length} active
@@ -194,25 +193,23 @@ export const WatchRoomPage: React.FC = () => {
 
         <div className="header-center desktop-only">
           <div className="room-id-tag">
-            <code>#{roomId?.slice(0, 8)}</code>
+            <span style={{opacity: 0.5, fontSize: '0.7rem'}}>ROOM ID:</span>
+            <code>{roomId?.slice(0, 8)}</code>
             <button className="copy-btn" onClick={handleCopyLink}>
-              {copied ? <Check size={14} color="#27c93f" /> : <Copy size={14} />}
+              {copied ? <Check size={14} color="#f472b6" /> : <Copy size={14} color="white" />}
             </button>
           </div>
         </div>
 
         <div className="header-right">
-          <button className="btn-invite mobile-only" onClick={handleCopyLink}>
-             <Copy size={18} />
-          </button>
           <button className="btn-leave" onClick={handleLeaveRoom}>
-            {isHost ? 'Disband' : 'Leave'}
+            {isHost ? 'Disband Party' : 'Leave Party'}
           </button>
           <button 
-            className={`btn-chat-toggle mobile-only ${isSidebarOpen ? 'active' : ''}`}
+            className={`mobile-only btn-chat-toggle ${isSidebarOpen ? 'active' : ''}`}
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           >
-            <MessageSquare size={20} />
+            <MessageSquare size={20} color="white" />
           </button>
         </div>
       </header>
@@ -224,36 +221,57 @@ export const WatchRoomPage: React.FC = () => {
               <div className="loading-overlay">
                  {error ? (
                     <div className="error-state">
-                      <Tv size={48} color="#ff3b30" />
+                      <Tv size={48} color="#ff453a" />
                       <p>{error}</p>
                       <Button onClick={() => navigate('/dashboard')}>Go Home</Button>
                     </div>
                  ) : (
                     <div className="loading-state">
                       <div className="spinner"></div>
-                      <p>Waking up virtual browser...</p>
+                      <p>Waking up SyncAnime Browser...</p>
                     </div>
                  )}
               </div>
             )}
           </div>
+
+          <div className="bottom-control-bar">
+            <div className="avatar-stack">
+              {activeParticipants.slice(0, 5).map(p => (
+                <div key={p.userId} className="mini-avatar" title={p.userName}>
+                  {p.userName?.charAt(0).toUpperCase()}
+                </div>
+              ))}
+              {activeParticipants.length > 5 && (
+                <div className="mini-avatar">+{activeParticipants.length - 5}</div>
+              )}
+              <button className="btn-invite-circle" onClick={handleCopyLink}>
+                <Plus size={16} />
+              </button>
+            </div>
+
+            <div className="room-controls desktop-only">
+               <button className="icon-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+                  <MessageSquare size={20} color={isSidebarOpen ? "#a855f7" : "white"} />
+               </button>
+            </div>
+          </div>
         </main>
 
-        <aside className="sidebar-area">
+        <aside className="sidebar-area glass-card">
           <div className="sidebar-header">
             <button 
               className={activeTab === 'chat' ? 'active' : ''} 
               onClick={() => setActiveTab('chat')}
             >
-              Chat
+              LIVE CHAT
             </button>
             <button 
               className={activeTab === 'users' ? 'active' : ''} 
               onClick={() => setActiveTab('users')}
             >
-              Members
+              MEMBERS ({activeParticipants.length})
             </button>
-            <button className="mobile-only close-sidebar" onClick={() => setIsSidebarOpen(false)}>×</button>
           </div>
 
           <div className="sidebar-body">
@@ -273,18 +291,18 @@ export const WatchRoomPage: React.FC = () => {
                 
                 <div className="chat-controls">
                   <div className="emoji-bar">
-                    {['😊', '🍿', '🔥', '💖', '👏', '😂'].map(e => (
-                      <button key={e} onClick={() => insertEmoji(e)}>{e}</button>
+                    {['🍿', '✨', '🔥', '💖', '👏', '😂', '😭'].map(e => (
+                      <button key={e} onClick={() => insertEmoji(e)} style={{fontSize: '1.2rem'}}>{e}</button>
                     ))}
                   </div>
                   <form className="input-row" onSubmit={handleSendMessage}>
                     <input 
                       ref={inputRef}
-                      placeholder="Type something..." 
+                      placeholder="Send a reaction..." 
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
                     />
-                    <button type="submit" disabled={!message.trim()}>
+                    <button type="submit" disabled={!message.trim()} className="btn-send">
                       <Send size={18} />
                     </button>
                   </form>
@@ -295,11 +313,13 @@ export const WatchRoomPage: React.FC = () => {
                 {activeParticipants.map(p => (
                   <div key={p.userId} className="member-item">
                     <div className="member-avatar">
-                      {p.userName?.charAt(0)}
+                      {p.userName?.charAt(0).toUpperCase()}
                     </div>
                     <div className="member-info">
-                      <span className="member-name">{p.userId === user?.uid ? 'You' : p.userName}</span>
-                      {p.isHost && <span className="host-tag">Host</span>}
+                      <span className="member-name">
+                        {p.userId === user?.uid ? 'You' : p.userName}
+                      </span>
+                      {p.isHost && <span className="host-tag">HOST</span>}
                     </div>
                   </div>
                 ))}
