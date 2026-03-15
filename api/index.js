@@ -74,10 +74,12 @@ app.post('/api/room/create', async (req, res) => {
       const db = readDB();
       db.rooms.push({
         id: roomId,
-        userId,
+        userId, // Creator is the host
+        hostId: userId,
         name: `${userName || 'User'}'s Watch Party`,
         code: roomId,
-        participants: 1,
+        participantsCount: 1,
+        activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
         createdAt: new Date().toISOString()
       });
       // initialize empty message array
@@ -133,13 +135,6 @@ app.get('/api/users/:userId/rooms', (req, res) => {
   res.json(userRooms);
 });
 
-// 2. Get messages for a room
-app.get('/api/rooms/:roomId/messages', (req, res) => {
-  const { roomId } = req.params;
-  const db = readDB();
-  res.json(db.messages[roomId] || []);
-});
-
 // 3. Post a message to a room
 app.post('/api/rooms/:roomId/messages', (req, res) => {
   const { roomId } = req.params;
@@ -160,6 +155,79 @@ app.post('/api/rooms/:roomId/messages', (req, res) => {
   writeDB(db);
   
   res.json(newMessage);
+});
+
+// 4. Heartbeat / Join room
+app.post('/api/rooms/:roomId/heartbeat', (req, res) => {
+  const { roomId } = req.params;
+  const { userId, userName } = req.body;
+  const db = readDB();
+  
+  const room = db.rooms.find(r => r.id === roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+
+  if (!room.activeParticipants) room.activeParticipants = [];
+  
+  const pIndex = room.activeParticipants.findIndex(p => p.userId === userId);
+  const now = new Date().toISOString();
+
+  if (pIndex > -1) {
+    room.activeParticipants[pIndex].lastSeen = now;
+    room.activeParticipants[pIndex].userName = userName; // update just in case
+  } else {
+    room.activeParticipants.push({ 
+      userId, 
+      userName, 
+      lastSeen: now, 
+      isHost: room.hostId === userId 
+    });
+  }
+
+  // Cleanup inactive users (haven't sent heartbeat in 15 seconds)
+  const fifteenSecsAgo = new Date(Date.now() - 15000);
+  room.activeParticipants = room.activeParticipants.filter(p => new Date(p.lastSeen) > fifteenSecsAgo);
+  room.participantsCount = room.activeParticipants.length;
+
+  // Cleanup room if host is gone for > 30 seconds
+  const thirtySecsAgo = new Date(Date.now() - 30000);
+  const isHostActive = room.activeParticipants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
+  
+  if (!isHostActive && room.activeParticipants.length > 0) {
+    // Check if host ever existed/was seen recently
+    // If not active, we mark the room for deletion but usually vercel/serverless is stateless
+    // For this local DB implementation, we just filter it out in the next read or delete now
+    console.log(`Room ${roomId} host inactive. Room will be disbanded.`);
+    // db.rooms = db.rooms.filter(r => r.id !== roomId); // Uncomment for aggressive deletion
+  }
+
+  writeDB(db);
+  res.json({ 
+    success: true, 
+    participants: room.activeParticipants,
+    isHostActive 
+  });
+});
+
+// 5. Leave room explicitly
+app.post('/api/rooms/:roomId/leave', (req, res) => {
+  const { roomId } = req.params;
+  const { userId } = req.body;
+  const db = readDB();
+
+  const room = db.rooms.find(r => r.id === roomId);
+  if (room && room.activeParticipants) {
+    room.activeParticipants = room.activeParticipants.filter(p => p.userId !== userId);
+    room.participantsCount = room.activeParticipants.length;
+    
+    // If host leaves, disband
+    if (room.hostId === userId) {
+      db.rooms = db.rooms.filter(r => r.id !== roomId);
+      delete db.messages[roomId];
+    }
+    
+    writeDB(db);
+  }
+  res.json({ success: true });
 });
 
 // Export the app for Vercel Serverless execution
