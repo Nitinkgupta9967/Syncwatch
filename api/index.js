@@ -1,25 +1,40 @@
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import admin from 'firebase-admin';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit,
+  addDoc
+} from 'firebase/firestore';
 
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
-  if (!projectId) {
-    console.error("CRITICAL ERROR: Firebase Project ID is missing from environment variables!");
-  }
-  admin.initializeApp({
-    projectId: projectId
-  });
-}
+// Initialize Firebase Client SDK for Backend Use
+const firebaseConfig = {
+  apiKey: process.env.VITE_FIREBASE_API_KEY,
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.VITE_FIREBASE_APP_ID
+};
 
-const db = admin.firestore();
-console.log("Firebase Admin Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
+console.log("Firebase Client SDK Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,7 +57,8 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/debug-env', (req, res) => {
   res.json({
-    hasProjectId: !!(process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID),
+    hasProjectId: !!process.env.VITE_FIREBASE_PROJECT_ID,
+    hasApiKey: !!process.env.VITE_FIREBASE_API_KEY,
     hasHyperbeam: !!process.env.HYPERBEAM_API_KEY,
     nodeEnv: process.env.NODE_ENV,
     vercel: !!process.env.VERCEL
@@ -62,10 +78,9 @@ app.post('/api/room/create', async (req, res) => {
   console.log("Room creation request received:", req.body);
   
   if (!HYPERBEAM_API_KEY) {
-    console.error("CRITICAL: HYPERBEAM_API_KEY is missing.");
     return res.status(500).json({ 
       error: 'Configuration Error', 
-      message: 'HYPERBEAM_API_KEY is missing in Vercel settings. Please add it to your environment variables.' 
+      message: 'HYPERBEAM_API_KEY is missing. Please add it to your environment variables.' 
     });
   }
 
@@ -74,17 +89,14 @@ app.post('/api/room/create', async (req, res) => {
     
     let response;
     try {
-      // Basic settings for the new virtual browser
       response = await hyperbeamClient.post('/vm', {
         timeout: {
-          absolute: 7200, // 2 hours max
-          offline: 300 // 5 minutes empty shutdown
+          absolute: 7200, 
+          offline: 300 
         }
       });
     } catch (hbError) {
-      console.error("====== HYPERBEAM API ERROR ======");
-      console.error("Status:", hbError.response?.status);
-      console.error("Data:", hbError.response?.data);
+      console.error("HYPERBEAM API ERROR:", hbError.response?.data || hbError.message);
       return res.status(hbError.response?.status || 500).json({
         error: 'Hyperbeam API Error',
         details: hbError.response?.data || hbError.message
@@ -97,7 +109,7 @@ app.post('/api/room/create', async (req, res) => {
     // Save to Firestore
     try {
       if (userId) {
-        await db.collection('rooms').doc(roomId).set({
+        await setDoc(doc(db, 'rooms', roomId), {
           id: roomId,
           userId, 
           hostId: userId,
@@ -128,19 +140,16 @@ app.post('/api/room/create', async (req, res) => {
 // Retrieve embed URL for an existing room
 app.get('/api/room/:id', async (req, res) => {
   if (!HYPERBEAM_API_KEY) {
-    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing in Vercel settings.' });
+    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing.' });
   }
   try {
     const { id } = req.params;
-    
     const response = await hyperbeamClient.get(`/vm/${id}`);
-    
     res.json({
       roomId: response.data.session_id,
       embedUrl: response.data.embed_url
     });
   } catch (error) {
-    console.error("Hyperbeam Get Error:", error.response?.data || error.message);
     res.status(404).json({ error: 'Room not found or expired' });
   }
 });
@@ -149,11 +158,8 @@ app.get('/api/room/:id', async (req, res) => {
 app.get('/api/users/:userId/rooms', async (req, res) => {
   try {
     const { userId } = req.params;
-    const snapshot = await db.collection('rooms')
-      .where('userId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .get();
-    
+    const q = query(collection(db, 'rooms'), where('userId', '==', userId), orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
     const userRooms = snapshot.docs.map(doc => doc.data());
     res.json(userRooms);
   } catch (error) {
@@ -166,11 +172,12 @@ app.get('/api/users/:userId/rooms', async (req, res) => {
 app.get('/api/rooms/:roomId/messages', async (req, res) => {
   try {
     const { roomId } = req.params;
-    const snapshot = await db.collection('rooms').doc(roomId).collection('messages')
-      .orderBy('createdAt', 'asc')
-      .limit(100)
-      .get();
-    
+    const q = query(
+      collection(db, 'rooms', roomId, 'messages'),
+      orderBy('createdAt', 'asc'),
+      limit(100)
+    );
+    const snapshot = await getDocs(q);
     const messages = snapshot.docs.map(doc => doc.data());
     res.json(messages);
   } catch (error) {
@@ -190,7 +197,7 @@ app.post('/api/rooms/:roomId/messages', async (req, res) => {
       createdAt: new Date().toISOString()
     };
     
-    await db.collection('rooms').doc(roomId).collection('messages').add(newMessage);
+    await addDoc(collection(db, 'rooms', roomId, 'messages'), newMessage);
     res.json(newMessage);
   } catch (error) {
     res.status(500).json({ error: 'Failed to send message' });
@@ -203,10 +210,10 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
     const { roomId } = req.params;
     const { userId, userName } = req.body;
     
-    const roomRef = db.collection('rooms').doc(roomId);
-    const doc = await roomRef.get();
+    const roomRef = doc(db, 'rooms', roomId);
+    const roomSnap = await getDoc(roomRef);
     
-    if (!doc.exists) {
+    if (!roomSnap.exists()) {
       return res.status(200).json({ 
         success: false, 
         warning: 'Room not found in Firestore.',
@@ -214,7 +221,7 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
       });
     }
 
-    const room = doc.data();
+    const room = roomSnap.data();
     let participants = room.activeParticipants || [];
     
     const pIndex = participants.findIndex(p => p.userId === userId);
@@ -241,7 +248,7 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
     const thirtySecsAgo = new Date(Date.now() - 30000);
     const isHostActive = participants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
 
-    await roomRef.update({
+    await updateDoc(roomRef, {
       activeParticipants: participants,
       participantsCount: participants.length
     });
@@ -253,15 +260,10 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
     });
   } catch (error) {
     console.error("====== HEARTBEAT SYSTEM ERROR ======");
-    console.error("RoomId:", req.params.roomId);
-    console.error("Error Name:", error.name);
     console.error("Error Message:", error.message);
-    if (error.stack) console.error("Stack:", error.stack);
-    
     res.status(500).json({ 
       error: 'Heartbeat failed', 
-      details: error.message,
-      code: error.code || 'UNKNOWN'
+      details: error.message
     });
   }
 });
@@ -272,20 +274,18 @@ app.post('/api/rooms/:roomId/leave', async (req, res) => {
     const { roomId } = req.params;
     const { userId } = req.body;
     
-    const roomRef = db.collection('rooms').doc(roomId);
-    const doc = await roomRef.get();
+    const roomRef = doc(db, 'rooms', roomId);
+    const roomSnap = await getDoc(roomRef);
     
-    if (doc.exists) {
-      const room = doc.data();
+    if (roomSnap.exists()) {
+      const room = roomSnap.data();
       let participants = room.activeParticipants || [];
       participants = participants.filter(p => p.userId !== userId);
       
       if (room.hostId === userId) {
-        // If host leaves, delete the room
-        await roomRef.delete();
-        // Option: also delete messages sub-collection if needed
+        await deleteDoc(roomRef);
       } else {
-        await roomRef.update({
+        await updateDoc(roomRef, {
           activeParticipants: participants,
           participantsCount: participants.length
         });
@@ -293,17 +293,16 @@ app.post('/api/rooms/:roomId/leave', async (req, res) => {
     }
     res.json({ success: true });
   } catch (error) {
-    console.error("Leave Error:", error);
     res.status(500).json({ error: 'Leave failed '});
   }
 });
 
-// Export the app for Vercel Serverless execution
+// Export the app for Vercel
 export default app;
 
-// Listen locally if not in Vercel
+// Listen locally
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`SyncAnime Auth Backend running on http://localhost:${PORT}`);
+    console.log(`SyncAnime Backend running on http://localhost:${PORT}`);
   });
 }
