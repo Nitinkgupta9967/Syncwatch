@@ -1,13 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Hyperbeam from '@hyperbeam/web';
+import { db } from '../lib/firebase';
+import {
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  limit
+} from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
-import { 
-  ArrowLeft, MessageSquare, Send, Copy, Check, Tv, Plus, 
+import {
+  ArrowLeft, MessageSquare, Send, Copy, Check, Tv, Plus,
   Moon, Sun, Volume2, Maximize, Play, Zap, Info
 } from 'lucide-react';
 import './WatchRoomPage.css';
+
+interface Message {
+  id: string;
+  text: string;
+  user: string;
+  userId: string;
+  isSystem: boolean;
+  time: string;
+  createdAt: any; 
+}
 
 export const WatchRoomPage: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
@@ -27,8 +45,8 @@ export const WatchRoomPage: React.FC = () => {
   const { user } = useAuth();
   const userName = user?.displayName || user?.email?.split('@')[0] || 'Anonymous';
   const API_URL = import.meta.env.PROD ? '' : 'http://localhost:3001';
-  
-  const [messages, setMessages] = useState<any[]>([]);
+
+  const [messages, setMessages] = useState<Message[]>([]);
   const [activeParticipants, setActiveParticipants] = useState<any[]>([]);
   const [isHost, setIsHost] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -48,7 +66,7 @@ export const WatchRoomPage: React.FC = () => {
   // Heartbeat & Participants
   useEffect(() => {
     if (!roomId || !user) return;
-    
+
     const sendHeartbeat = async () => {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${roomId}/heartbeat`, {
@@ -56,15 +74,15 @@ export const WatchRoomPage: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: user.uid, userName })
         });
-        
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        
+
         if (data.participants) {
           setActiveParticipants(data.participants);
           const currentUser = data.participants.find((p: any) => p.userId === user.uid);
           setIsHost(!!currentUser?.isHost);
-          
+
           if (!data.isHostActive && !currentUser?.isHost) {
             setError("Room has been disbanded by the host.");
           }
@@ -74,28 +92,31 @@ export const WatchRoomPage: React.FC = () => {
       }
     };
 
-    const fetchMessages = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/rooms/${roomId}/messages`);
-        if (!res.ok) return; // Silent fail for background polling
-        const data = await res.json();
-        setMessages(data);
-      } catch (err) {
-        console.error("Failed to fetch messages:", err);
-      }
-    };
+    // Real-time Messages Listener
+    const messagesQuery = query(
+      collection(db, 'rooms', roomId || '', 'messages'),
+      orderBy('createdAt', 'asc'),
+      limit(100)
+    );
 
-    sendHeartbeat();
-    fetchMessages();
-    
-    const hInterval = setInterval(sendHeartbeat, 5000);
-    const mInterval = setInterval(fetchMessages, 2000);
-    
+    const unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...(doc.data() as Omit<Message, 'id'>)
+      })) as Message[];
+      setMessages(msgs);
+    }, (error) => {
+      console.error("Firestore Message Error:", error);
+    });
+
+    sendHeartbeat(); // Initial heartbeat
+    const heartbeatInterval = setInterval(sendHeartbeat, 5000);
+
     return () => {
-      clearInterval(hInterval);
-      clearInterval(mInterval);
+      clearInterval(heartbeatInterval);
+      unsubscribeMessages();
     };
-  }, [roomId, user, userName, API_URL]);
+  }, [roomId, user, userName, navigate, API_URL]);
 
   // Hyperbeam Initialization
   useEffect(() => {
@@ -111,6 +132,7 @@ export const WatchRoomPage: React.FC = () => {
         if (data.error) throw new Error(data.error);
         
         if (containerRef.current && isMounted) {
+          // @ts-ignore
           hb = await Hyperbeam(containerRef.current, data.embedUrl);
           if (!isMounted) {
             hb.destroy();
@@ -131,7 +153,7 @@ export const WatchRoomPage: React.FC = () => {
       isMounted = false;
       if (hb) hb.destroy();
     };
-  }, [roomId, API_URL]);
+  }, [roomId, hbInstance, API_URL]);
 
   const handleLeaveRoom = async () => {
     if (!roomId || !user) return;
@@ -295,7 +317,7 @@ export const WatchRoomPage: React.FC = () => {
                     </div>
                   )}
                   {messages.map((msg, i) => (
-                    <div key={i} className={`chat-message ${msg.userId === user?.uid ? 'is-self' : ''} ${msg.isHost ? 'is-host' : ''}`}>
+                    <div key={i} className={`chat-message ${msg.userId === user?.uid ? 'is-self' : ''} ${msg.isSystem ? 'is-system' : ''}`}>
                       <div className="msg-avatar">
                         {msg.user?.charAt(0).toUpperCase()}
                       </div>
@@ -325,30 +347,30 @@ export const WatchRoomPage: React.FC = () => {
                      />
                      <button className="chat-send-btn" disabled={!message.trim()} type="submit">
                         <Send size={18} />
-                     </button>
-                  </form>
-                </div>
-              </div>
-            ) : (
-              <div className="member-view">
-                 {activeParticipants.map(p => (
-                   <div key={p.userId} className={`member-row ${p.isHost ? 'host-glow' : ''}`}>
-                      <div className="member-avatar-box">
-                         {p.userName?.charAt(0).toUpperCase()}
-                         <span className="ping-indicator excellent"></span>
-                      </div>
-                      <div className="member-details">
-                         <span className="member-name">{p.userName}</span>
-                         <span className="member-role">{p.isHost ? 'Party Host' : 'Member'}</span>
-                      </div>
-                      {p.isHost && <span className="role-icon">👑</span>}
-                   </div>
-                 ))}
-              </div>
-            )}
-          </div>
-        </aside>
-      </div>
-    </div>
-  );
-};
+                      </button>
+                   </form>
+                 </div>
+               </div>
+             ) : (
+               <div className="member-view">
+                  {activeParticipants.map(p => (
+                    <div key={p.userId} className={`member-row ${p.isHost ? 'host-glow' : ''}`}>
+                       <div className="member-avatar-box">
+                          {p.userName?.charAt(0).toUpperCase()}
+                          <span className="ping-indicator excellent"></span>
+                       </div>
+                       <div className="member-details">
+                          <span className="member-name">{p.userName}</span>
+                          <span className="member-role">{p.isHost ? 'Party Host' : 'Member'}</span>
+                       </div>
+                       {p.isHost && <span className="role-icon">👑</span>}
+                    </div>
+                  ))}
+               </div>
+             )}
+           </div>
+         </aside>
+       </div>
+     </div>
+   );
+ };

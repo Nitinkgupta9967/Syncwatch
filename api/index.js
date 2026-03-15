@@ -5,6 +5,16 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
+import admin from 'firebase-admin';
+
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  admin.initializeApp({
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID // Use existing client project ID
+  });
+}
+
+const db = admin.firestore();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,27 +30,10 @@ if (!HYPERBEAM_API_KEY && !process.env.VERCEL) {
 app.use(cors());
 app.use(express.json());
 
-// Simplistic db.json setup - Using /tmp/ for Vercel Serverless compatibility
-const DB_FILE = process.env.VERCEL ? path.join('/tmp', 'db.json') : path.join(__dirname, 'db.json');
-console.log("DB_FILE Path:", DB_FILE);
-
 // Health check to verify API is alive
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), vercel: !!process.env.VERCEL });
 });
-
-// Helper functions for reading/writing our JSON database
-function readDB() {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ rooms: [], messages: {} }));
-  }
-  const data = fs.readFileSync(DB_FILE, 'utf8');
-  return JSON.parse(data);
-}
-
-function writeDB(data) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
 
 // Helper function to call Hyperbeam REST API
 const hyperbeamClient = axios.create({
@@ -87,13 +80,12 @@ app.post('/api/room/create', async (req, res) => {
     const roomId = response.data.session_id;
     const embedUrl = response.data.embed_url;
 
-    // Save to our Local JSON Database if requested
+    // Save to Firestore
     try {
       if (userId) {
-        const db = readDB();
-        db.rooms.push({
+        await db.collection('rooms').doc(roomId).set({
           id: roomId,
-          userId, // Creator is the host
+          userId, 
           hostId: userId,
           name: `${userName || 'User'}'s Anime Party`,
           code: roomId,
@@ -101,14 +93,9 @@ app.post('/api/room/create', async (req, res) => {
           activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
           createdAt: new Date().toISOString()
         });
-        // initialize empty message array
-        db.messages[roomId] = [];
-        writeDB(db);
       }
     } catch (dbError) {
-      console.error("Database Write Error:", dbError.message);
-      // We don't necessarily want to fail the whole request if DB write fails, 
-      // but on Vercel /tmp might be tricky.
+      console.error("Firestore Write Error:", dbError.message);
     }
 
     res.json({
@@ -144,135 +131,148 @@ app.get('/api/room/:id', async (req, res) => {
   }
 });
 
-// JSON DB Routes
-
 // 1. Get recent rooms for a user
-app.get('/api/users/:userId/rooms', (req, res) => {
+app.get('/api/users/:userId/rooms', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
-    const userRooms = db.rooms.filter(r => r.userId === userId);
-    // Sort descending by creation date
-    userRooms.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const snapshot = await db.collection('rooms')
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .get();
+    
+    const userRooms = snapshot.docs.map(doc => doc.data());
     res.json(userRooms);
   } catch (error) {
-    res.json([]); // Return empty list on failure
+    console.error("Fetch Rooms Error:", error);
+    res.json([]); 
   }
 });
 
 // 2. Get messages for a room
-app.get('/api/rooms/:roomId/messages', (req, res) => {
+app.get('/api/rooms/:roomId/messages', async (req, res) => {
   try {
     const { roomId } = req.params;
-    const db = readDB();
-    res.json(db.messages[roomId] || []);
+    const snapshot = await db.collection('rooms').doc(roomId).collection('messages')
+      .orderBy('createdAt', 'asc')
+      .limit(100)
+      .get();
+    
+    const messages = snapshot.docs.map(doc => doc.data());
+    res.json(messages);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
 
 // 3. Post a message to a room
-app.post('/api/rooms/:roomId/messages', (req, res) => {
-  const { roomId } = req.params;
-  const msg = req.body;
-  const db = readDB();
-  
-  if (!db.messages[roomId]) {
-    db.messages[roomId] = [];
+app.post('/api/rooms/:roomId/messages', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const msg = req.body;
+    
+    const newMessage = {
+      id: Date.now().toString(),
+      ...msg,
+      createdAt: new Date().toISOString()
+    };
+    
+    await db.collection('rooms').doc(roomId).collection('messages').add(newMessage);
+    res.json(newMessage);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send message' });
   }
-  
-  const newMessage = {
-    id: Date.now().toString(),
-    ...msg,
-    createdAt: new Date().toISOString()
-  };
-  
-  db.messages[roomId].push(newMessage);
-  writeDB(db);
-  
-  res.json(newMessage);
 });
 
 // 4. Heartbeat / Join room
-app.post('/api/rooms/:roomId/heartbeat', (req, res) => {
-  const { roomId } = req.params;
-  const { userId, userName } = req.body;
-  const db = readDB();
-  
-  const room = db.rooms.find(r => r.id === roomId);
-  if (!room) {
-    // If room not found in DB but ID is provided, it might have been lost due to serverless restart.
-    // Return a soft error instead of a hard 404 to avoid frontend crashes.
-    return res.status(200).json({ 
-      success: false, 
-      warning: 'Room entry not found in serverless cache.',
-      participants: [] 
+app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { userId, userName } = req.body;
+    
+    const roomRef = db.collection('rooms').doc(roomId);
+    const doc = await roomRef.get();
+    
+    if (!doc.exists) {
+      return res.status(200).json({ 
+        success: false, 
+        warning: 'Room not found in Firestore.',
+        participants: [] 
+      });
+    }
+
+    const room = doc.data();
+    let participants = room.activeParticipants || [];
+    
+    const pIndex = participants.findIndex(p => p.userId === userId);
+    const now = new Date().toISOString();
+
+    if (pIndex > -1) {
+      participants[pIndex].lastSeen = now;
+      participants[pIndex].userName = userName; 
+      participants[pIndex].isHost = room.hostId === userId;
+    } else {
+      participants.push({ 
+        userId, 
+        userName, 
+        lastSeen: now, 
+        isHost: room.hostId === userId 
+      });
+    }
+
+    // Cleanup inactive users (15 seconds)
+    const fifteenSecsAgo = new Date(Date.now() - 15000);
+    participants = participants.filter(p => new Date(p.lastSeen) > fifteenSecsAgo);
+    
+    // Check if host is active (30 seconds)
+    const thirtySecsAgo = new Date(Date.now() - 30000);
+    const isHostActive = participants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
+
+    await roomRef.update({
+      activeParticipants: participants,
+      participantsCount: participants.length
     });
-  }
 
-  if (!room.activeParticipants) room.activeParticipants = [];
-  
-  const pIndex = room.activeParticipants.findIndex(p => p.userId === userId);
-  const now = new Date().toISOString();
-
-  if (pIndex > -1) {
-    room.activeParticipants[pIndex].lastSeen = now;
-    room.activeParticipants[pIndex].userName = userName; 
-    room.activeParticipants[pIndex].isHost = room.hostId === userId; // Ensure host status is correct
-  } else {
-    room.activeParticipants.push({ 
-      userId, 
-      userName, 
-      lastSeen: now, 
-      isHost: room.hostId === userId 
+    res.json({ 
+      success: true, 
+      participants: participants,
+      isHostActive 
     });
+  } catch (error) {
+    console.error("Heartbeat Error:", error);
+    res.status(500).json({ error: 'Heartbeat failed' });
   }
-
-  // Cleanup inactive users (haven't sent heartbeat in 15 seconds)
-  const fifteenSecsAgo = new Date(Date.now() - 15000);
-  room.activeParticipants = room.activeParticipants.filter(p => new Date(p.lastSeen) > fifteenSecsAgo);
-  room.participantsCount = room.activeParticipants.length;
-
-  // Cleanup room if host is gone for > 30 seconds
-  const thirtySecsAgo = new Date(Date.now() - 30000);
-  const isHostActive = room.activeParticipants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
-  
-  if (!isHostActive && room.activeParticipants.length > 0) {
-    // Check if host ever existed/was seen recently
-    // If not active, we mark the room for deletion but usually vercel/serverless is stateless
-    // For this local DB implementation, we just filter it out in the next read or delete now
-    console.log(`Room ${roomId} host inactive. Room will be disbanded.`);
-    // db.rooms = db.rooms.filter(r => r.id !== roomId); // Uncomment for aggressive deletion
-  }
-
-  writeDB(db);
-  res.json({ 
-    success: true, 
-    participants: room.activeParticipants,
-    isHostActive 
-  });
 });
 
 // 5. Leave room explicitly
-app.post('/api/rooms/:roomId/leave', (req, res) => {
-  const { roomId } = req.params;
-  const { userId } = req.body;
-  const db = readDB();
-
-  const room = db.rooms.find(r => r.id === roomId);
-  if (room && room.activeParticipants) {
-    room.activeParticipants = room.activeParticipants.filter(p => p.userId !== userId);
-    room.participantsCount = room.activeParticipants.length;
+app.post('/api/rooms/:roomId/leave', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { userId } = req.body;
     
-    // If host leaves, disband
-    if (room.hostId === userId) {
-      db.rooms = db.rooms.filter(r => r.id !== roomId);
-      delete db.messages[roomId];
+    const roomRef = db.collection('rooms').doc(roomId);
+    const doc = await roomRef.get();
+    
+    if (doc.exists) {
+      const room = doc.data();
+      let participants = room.activeParticipants || [];
+      participants = participants.filter(p => p.userId !== userId);
+      
+      if (room.hostId === userId) {
+        // If host leaves, delete the room
+        await roomRef.delete();
+        // Option: also delete messages sub-collection if needed
+      } else {
+        await roomRef.update({
+          activeParticipants: participants,
+          participantsCount: participants.length
+        });
+      }
     }
-    
-    writeDB(db);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Leave Error:", error);
+    res.status(500).json({ error: 'Leave failed '});
   }
-  res.json({ success: true });
 });
 
 // Export the app for Vercel Serverless execution
