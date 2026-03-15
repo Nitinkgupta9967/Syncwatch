@@ -7,6 +7,7 @@ import 'dotenv/config';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, 
+  initializeFirestore,
   collection, 
   doc, 
   getDoc, 
@@ -32,7 +33,9 @@ const firebaseConfig = {
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
+const db = initializeFirestore(firebaseApp, {
+  experimentalForceLongPolling: true,
+});
 
 console.log("Firebase Client SDK Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
 
