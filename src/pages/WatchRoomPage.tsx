@@ -3,7 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Hyperbeam from '@hyperbeam/web';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
-import { ArrowLeft, MessageSquare, Send, Copy, Check, Tv, Plus } from 'lucide-react';
+import { 
+  ArrowLeft, MessageSquare, Send, Copy, Check, Tv, Plus, 
+  Moon, Sun, Volume2, Maximize, Play, Zap, Info
+} from 'lucide-react';
 import './WatchRoomPage.css';
 
 export const WatchRoomPage: React.FC = () => {
@@ -13,9 +16,13 @@ export const WatchRoomPage: React.FC = () => {
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [hbInstance, setHbInstance] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimeout = useRef<any>(null);
 
   const { user } = useAuth();
   const userName = user?.displayName || user?.email?.split('@')[0] || 'Anonymous';
@@ -24,9 +31,21 @@ export const WatchRoomPage: React.FC = () => {
   const [messages, setMessages] = useState<any[]>([]);
   const [activeParticipants, setActiveParticipants] = useState<any[]>([]);
   const [isHost, setIsHost] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // 1. Heartbeat & Participants
+  // Theme Sync
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // Handle idle controls
+  const handleMouseMove = () => {
+    setShowControls(true);
+    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    controlsTimeout.current = setTimeout(() => setShowControls(false), 3000);
+  };
+
+  // Heartbeat & Participants
   useEffect(() => {
     if (!roomId || !user) return;
     
@@ -75,7 +94,7 @@ export const WatchRoomPage: React.FC = () => {
     };
   }, [roomId, user, userName, API_URL]);
 
-  // Handle Hyperbeam Initialization
+  // Hyperbeam Initialization
   useEffect(() => {
     let hb: any = null;
     let isMounted = true;
@@ -113,6 +132,8 @@ export const WatchRoomPage: React.FC = () => {
 
   const handleLeaveRoom = async () => {
     if (!roomId || !user) return;
+    if (!confirm(isHost ? 'Disband the party for everyone?' : 'Are you sure you want to leave?')) return;
+    
     try {
       await fetch(`${API_URL}/api/rooms/${roomId}/leave`, {
         method: 'POST',
@@ -134,195 +155,192 @@ export const WatchRoomPage: React.FC = () => {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim() && user) {
-      const now = new Date();
+      const msgText = message.trim();
+      setMessage('');
       try {
         await fetch(`${API_URL}/api/rooms/${roomId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: message.trim(),
+            text: msgText,
             user: userName,
             userId: user.uid,
             isSystem: false,
-            time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           })
         });
-        setMessage('');
-        // Ensure input stays focused on mobile after sending
-        inputRef.current?.focus();
-      } catch (err: any) {
+      } catch (err) {
         console.error("Failed to send message", err);
       }
     }
   };
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Focus fixed for keyboards
-  useEffect(() => {
-    if (activeTab === 'chat' && isSidebarOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [activeTab, isSidebarOpen]);
-
-  const insertEmoji = (emoji: string) => {
-    setMessage(prev => prev + emoji);
-    inputRef.current?.focus();
-  };
-
   return (
-    <div className={`watch-room-page ${isSidebarOpen ? 'sidebar-open' : ''}`}>
-      <header className="room-header animate-fade-in">
+    <div className={`watch-room-page theme-${theme} ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`} onMouseMove={handleMouseMove}>
+      <header className={`room-header glass-card ${showControls ? 'visible' : 'hidden'}`}>
         <div className="header-left">
-          <button className="icon-btn" onClick={() => navigate('/dashboard')}>
-            <ArrowLeft size={20} color="white" />
+          <button className="back-link" onClick={() => navigate('/dashboard')}>
+            <ArrowLeft size={20} />
           </button>
-          <div className="room-meta-header">
-            <h3>{isHost ? 'SyncAnime Host' : "SyncAnime Party"}</h3>
-            <div className="status-badge">
-              <span className="pulse"></span>
-              {activeParticipants.length} active
+          <div className="room-identity">
+            <h3 className="room-name">{isHost ? '👑 Host Lobby' : 'SyncAnime Party'}</h3>
+            <div className="active-badge">
+              <span className="pulse-dot green"></span>
+              {activeParticipants.length} Active Watching
             </div>
           </div>
         </div>
 
-        <div className="header-center desktop-only">
-          <div className="room-id-tag">
-            <span style={{opacity: 0.5, fontSize: '0.7rem'}}>ROOM ID:</span>
-            <code>{roomId?.slice(0, 8)}</code>
-            <button className="copy-btn" onClick={handleCopyLink}>
-              {copied ? <Check size={14} color="#f472b6" /> : <Copy size={14} color="white" />}
+        <div className="header-center desk-flex">
+          <div className="room-id-pill glass-card">
+            <Info size={14} style={{opacity: 0.6}} />
+            <span>ID: {roomId?.slice(0, 8)}...</span>
+            <button className="copy-action" onClick={handleCopyLink}>
+              {copied ? <Check size={14} className="text-pink" /> : <Copy size={14} />}
             </button>
           </div>
         </div>
 
         <div className="header-right">
-          <button className="btn-leave" onClick={handleLeaveRoom}>
-            {isHost ? 'Disband Party' : 'Leave Party'}
+          <button className="theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </button>
-          <button 
-            className={`mobile-only btn-chat-toggle ${isSidebarOpen ? 'active' : ''}`}
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          >
-            <MessageSquare size={20} color="white" />
+          <button className="pill-btn danger" onClick={handleLeaveRoom}>
+            Leave Party
+          </button>
+          <button className="mobile-chat-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            <MessageSquare size={20} />
           </button>
         </div>
       </header>
 
       <div className="main-layout">
-        <main className="video-area">
-          <div className="browser-frame" ref={containerRef}>
-            {(isLoading || error) && (
-              <div className="loading-overlay">
-                 {error ? (
-                    <div className="error-state">
-                      <Tv size={48} color="#ff453a" />
-                      <p>{error}</p>
-                      <Button onClick={() => navigate('/dashboard')}>Go Home</Button>
-                    </div>
-                 ) : (
-                    <div className="loading-state">
-                      <div className="spinner"></div>
-                      <p>Waking up SyncAnime Browser...</p>
-                    </div>
-                 )}
-              </div>
-            )}
-          </div>
-
-          <div className="bottom-control-bar">
-            <div className="avatar-stack">
-              {activeParticipants.slice(0, 5).map(p => (
-                <div key={p.userId} className="mini-avatar" title={p.userName}>
-                  {p.userName?.charAt(0).toUpperCase()}
+        <main className="cinematic-area">
+          <div className="player-wrapper">
+            <div className="browser-container" ref={containerRef}>
+              {isLoading && (
+                <div className="loading-state">
+                  <div className="anime-spinner"></div>
+                  <p>Syncing virtual browser...</p>
                 </div>
-              ))}
-              {activeParticipants.length > 5 && (
-                <div className="mini-avatar">+{activeParticipants.length - 5}</div>
               )}
-              <button className="btn-invite-circle" onClick={handleCopyLink}>
-                <Plus size={16} />
-              </button>
+              {error && (
+                <div className="error-state glass-card">
+                  <Tv size={48} className="text-danger" />
+                  <p>{error}</p>
+                  <Button onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>
+                </div>
+              )}
             </div>
 
-            <div className="room-controls desktop-only">
-               <button className="icon-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-                  <MessageSquare size={20} color={isSidebarOpen ? "#a855f7" : "white"} />
-               </button>
+            {/* Floating Video Controls */}
+            <div className={`video-controls-overlay ${showControls ? 'visible' : 'hidden'}`}>
+                <div className="control-panel glass-card">
+                   <button className="ctrl-btn"><Play size={22} fill="currentColor" /></button>
+                   <div className="volume-wrap">
+                      <Volume2 size={18} />
+                      <div className="slider-bg"><div className="slider-fill" style={{width: '70%'}}></div></div>
+                   </div>
+                   <div className="sync-status">
+                      <Zap size={14} className="text-pink" />
+                      <span>Synced</span>
+                   </div>
+                   <button className="ctrl-btn"><Maximize size={20} /></button>
+                </div>
+            </div>
+
+            {/* Active Avatars Center Bottom */}
+            <div className={`floating-avatars ${showControls ? 'visible' : 'hidden'}`}>
+               <div className="avatar-group glass-card">
+                  {activeParticipants.slice(0, 4).map(p => (
+                    <div key={p.userId} className="user-avatar-pip" title={`${p.userName} (${p.isHost ? 'Host' : 'Member'})`}>
+                       <div className="pip-inner">
+                          {p.userName?.charAt(0).toUpperCase()}
+                          {p.isHost && <span className="host-badge">👑</span>}
+                          <span className="online-dot pulsing"></span>
+                       </div>
+                    </div>
+                  ))}
+                  {activeParticipants.length > 4 && <div className="user-avatar-pip more">+{activeParticipants.length - 4}</div>}
+                  <button className="add-friend-trigger" onClick={handleCopyLink}><Plus size={18} /></button>
+               </div>
             </div>
           </div>
         </main>
 
-        <aside className="sidebar-area glass-card">
-          <div className="sidebar-header">
-            <button 
-              className={activeTab === 'chat' ? 'active' : ''} 
-              onClick={() => setActiveTab('chat')}
-            >
-              LIVE CHAT
+        <aside className="discord-sidebar glass-card">
+          <div className="sidebar-tabs">
+            <button className={activeTab === 'chat' ? 'active' : ''} onClick={() => setActiveTab('chat')}>
+              Live Chat
             </button>
-            <button 
-              className={activeTab === 'users' ? 'active' : ''} 
-              onClick={() => setActiveTab('users')}
-            >
-              MEMBERS ({activeParticipants.length})
+            <button className={activeTab === 'users' ? 'active' : ''} onClick={() => setActiveTab('users')}>
+              Members
             </button>
           </div>
 
-          <div className="sidebar-body">
+          <div className="sidebar-content">
             {activeTab === 'chat' ? (
-              <div className="chat-wrapper">
-                <div className="chat-log">
+              <div className="chat-container">
+                <div className="chat-scroller">
+                  {messages.length === 0 && (
+                    <div className="empty-chat">
+                       <p>Start the conversation! 🍿</p>
+                    </div>
+                  )}
                   {messages.map((msg, i) => (
-                    <div key={i} className={`msg-item ${msg.userId === user?.uid ? 'own' : ''}`}>
-                      <div className="msg-bubble">
-                        <span className="msg-sender">{msg.user}</span>
-                        <p>{msg.text}</p>
+                    <div key={i} className={`chat-message ${msg.userId === user?.uid ? 'is-self' : ''} ${msg.isHost ? 'is-host' : ''}`}>
+                      <div className="msg-avatar">
+                        {msg.user?.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="msg-body">
+                        <div className="msg-header">
+                           <span className="msg-user">{msg.user}</span>
+                           <span className="msg-time">{msg.time}</span>
+                        </div>
+                        <div className="msg-bubble">{msg.text}</div>
                       </div>
                     </div>
                   ))}
-                  <div ref={messagesEndRef} />
+                  <div ref={scrollRef} />
                 </div>
-                
-                <div className="chat-controls">
-                  <div className="emoji-bar">
-                    {['🍿', '✨', '🔥', '💖', '👏', '😂', '😭'].map(e => (
-                      <button key={e} onClick={() => insertEmoji(e)} style={{fontSize: '1.2rem'}}>{e}</button>
+
+                <div className="typing-area">
+                  <div className="quick-emojis">
+                    {['🔥', '😍', '👏', '😂', '😭', '✨', '🍿'].map(e => (
+                      <button key={e} onClick={() => setMessage(prev => prev + e)}>{e}</button>
                     ))}
                   </div>
-                  <form className="input-row" onSubmit={handleSendMessage}>
-                    <input 
-                      ref={inputRef}
-                      placeholder="Send a reaction..." 
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                    />
-                    <button type="submit" disabled={!message.trim()} className="btn-send">
-                      <Send size={18} />
-                    </button>
+                  <form className="chat-input-wrap" onSubmit={handleSendMessage}>
+                     <input 
+                       placeholder="Say something nice..." 
+                       value={message}
+                       onChange={(e) => setMessage(e.target.value)}
+                     />
+                     <button className="chat-send-btn" disabled={!message.trim()} type="submit">
+                        <Send size={18} />
+                     </button>
                   </form>
                 </div>
               </div>
             ) : (
-              <div className="member-list">
-                {activeParticipants.map(p => (
-                  <div key={p.userId} className="member-item">
-                    <div className="member-avatar">
-                      {p.userName?.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="member-info">
-                      <span className="member-name">
-                        {p.userId === user?.uid ? 'You' : p.userName}
-                      </span>
-                      {p.isHost && <span className="host-tag">HOST</span>}
-                    </div>
-                  </div>
-                ))}
+              <div className="member-view">
+                 {activeParticipants.map(p => (
+                   <div key={p.userId} className={`member-row ${p.isHost ? 'host-glow' : ''}`}>
+                      <div className="member-avatar-box">
+                         {p.userName?.charAt(0).toUpperCase()}
+                         <span className="ping-indicator excellent"></span>
+                      </div>
+                      <div className="member-details">
+                         <span className="member-name">{p.userName}</span>
+                         <span className="member-role">{p.isHost ? 'Party Host' : 'Member'}</span>
+                      </div>
+                      {p.isHost && <span className="role-icon">👑</span>}
+                   </div>
+                 ))}
               </div>
             )}
           </div>
