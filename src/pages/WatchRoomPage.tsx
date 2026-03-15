@@ -4,7 +4,7 @@ import Hyperbeam from '@hyperbeam/web';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 
-import { ArrowLeft, MessageSquare, Send, Copy, Check, Tv, History } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Send, Copy, Check, Tv } from 'lucide-react';
 import './WatchRoomPage.css';
 
 export const WatchRoomPage: React.FC = () => {
