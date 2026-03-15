@@ -148,12 +148,27 @@ app.get('/api/room/:id', async (req, res) => {
 
 // 1. Get recent rooms for a user
 app.get('/api/users/:userId/rooms', (req, res) => {
-  const { userId } = req.params;
-  const db = readDB();
-  const userRooms = db.rooms.filter(r => r.userId === userId);
-  // Sort descending by creation date
-  userRooms.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json(userRooms);
+  try {
+    const { userId } = req.params;
+    const db = readDB();
+    const userRooms = db.rooms.filter(r => r.userId === userId);
+    // Sort descending by creation date
+    userRooms.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(userRooms);
+  } catch (error) {
+    res.json([]); // Return empty list on failure
+  }
+});
+
+// 2. Get messages for a room
+app.get('/api/rooms/:roomId/messages', (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const db = readDB();
+    res.json(db.messages[roomId] || []);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
 });
 
 // 3. Post a message to a room
@@ -185,7 +200,15 @@ app.post('/api/rooms/:roomId/heartbeat', (req, res) => {
   const db = readDB();
   
   const room = db.rooms.find(r => r.id === roomId);
-  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!room) {
+    // If room not found in DB but ID is provided, it might have been lost due to serverless restart.
+    // Return a soft error instead of a hard 404 to avoid frontend crashes.
+    return res.status(200).json({ 
+      success: false, 
+      warning: 'Room entry not found in serverless cache.',
+      participants: [] 
+    });
+  }
 
   if (!room.activeParticipants) room.activeParticipants = [];
   

@@ -56,6 +56,8 @@ export const WatchRoomPage: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: user.uid, userName })
         });
+        
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
         if (data.participants) {
@@ -75,6 +77,7 @@ export const WatchRoomPage: React.FC = () => {
     const fetchMessages = async () => {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${roomId}/messages`);
+        if (!res.ok) return; // Silent fail for background polling
         const data = await res.json();
         setMessages(data);
       } catch (err) {
