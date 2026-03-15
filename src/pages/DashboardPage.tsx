@@ -42,6 +42,19 @@ export const DashboardPage: React.FC = () => {
           userName: user?.displayName || user?.email?.split('@')[0]
         })
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        let errorMsg = 'Server error';
+        try {
+          const errData = JSON.parse(text);
+          errorMsg = errData.message || errData.error || errorMsg;
+        } catch {
+          errorMsg = `Server returned ${res.status}: ${text.slice(0, 100)}`;
+        }
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
       if (data.roomId) navigate(`/room/${data.roomId}`);
       else alert('Failed to create room: ' + (data.error || 'Unknown error'));

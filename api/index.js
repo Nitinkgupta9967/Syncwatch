@@ -52,39 +52,63 @@ const hyperbeamClient = axios.create({
 
 // Create a new room / Virtual Machine
 app.post('/api/room/create', async (req, res) => {
+  console.log("Room creation request received:", req.body);
+  
   if (!HYPERBEAM_API_KEY) {
-    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing in Vercel settings.' });
+    console.error("CRITICAL: HYPERBEAM_API_KEY is missing.");
+    return res.status(500).json({ 
+      error: 'Configuration Error', 
+      message: 'HYPERBEAM_API_KEY is missing in Vercel settings. Please add it to your environment variables.' 
+    });
   }
+
   try {
     const { userId, userName } = req.body || {};
     
-    // Basic settings for the new virtual browser
-    const response = await hyperbeamClient.post('/vm', {
-      timeout: {
-        absolute: 7200, // 2 hours max
-        offline: 300 // 5 minutes empty shutdown
-      }
-    });
+    let response;
+    try {
+      // Basic settings for the new virtual browser
+      response = await hyperbeamClient.post('/vm', {
+        timeout: {
+          absolute: 7200, // 2 hours max
+          offline: 300 // 5 minutes empty shutdown
+        }
+      });
+    } catch (hbError) {
+      console.error("====== HYPERBEAM API ERROR ======");
+      console.error("Status:", hbError.response?.status);
+      console.error("Data:", hbError.response?.data);
+      return res.status(hbError.response?.status || 500).json({
+        error: 'Hyperbeam API Error',
+        details: hbError.response?.data || hbError.message
+      });
+    }
     
     const roomId = response.data.session_id;
     const embedUrl = response.data.embed_url;
 
     // Save to our Local JSON Database if requested
-    if (userId) {
-      const db = readDB();
-      db.rooms.push({
-        id: roomId,
-        userId, // Creator is the host
-        hostId: userId,
-        name: `${userName || 'User'}'s Anime Party`,
-        code: roomId,
-        participantsCount: 1,
-        activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
-        createdAt: new Date().toISOString()
-      });
-      // initialize empty message array
-      db.messages[roomId] = [];
-      writeDB(db);
+    try {
+      if (userId) {
+        const db = readDB();
+        db.rooms.push({
+          id: roomId,
+          userId, // Creator is the host
+          hostId: userId,
+          name: `${userName || 'User'}'s Anime Party`,
+          code: roomId,
+          participantsCount: 1,
+          activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
+          createdAt: new Date().toISOString()
+        });
+        // initialize empty message array
+        db.messages[roomId] = [];
+        writeDB(db);
+      }
+    } catch (dbError) {
+      console.error("Database Write Error:", dbError.message);
+      // We don't necessarily want to fail the whole request if DB write fails, 
+      // but on Vercel /tmp might be tricky.
     }
 
     res.json({
@@ -92,13 +116,10 @@ app.post('/api/room/create', async (req, res) => {
       embedUrl: embedUrl
     });
   } catch (error) {
-    console.error("====== HYPERBEAM API ERROR ======");
-    console.error("Status:", error.response?.status);
-    console.error("Data:", error.response?.data);
-    console.error("Message:", error.message);
+    console.error("Unexpected Error in /api/room/create:", error);
     res.status(500).json({ 
-      error: 'Failed to create room',
-      details: error.response?.data || error.message
+      error: 'Internal Server Error',
+      message: error.message
     });
   }
 });
