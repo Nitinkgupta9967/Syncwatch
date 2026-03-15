@@ -4,40 +4,37 @@ import axios from 'axios';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  initializeFirestore,
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  limit,
-  addDoc
-} from 'firebase/firestore';
+import admin from 'firebase-admin';
 
-// Initialize Firebase Client SDK for Backend Use
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.VITE_FIREBASE_APP_ID
-};
+// Initialize Firebase Admin with Service Account support
+if (!admin.apps.length) {
+  let credential = admin.credential.applicationDefault();
+  
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // If user provides a base64 encoded service account JSON
+    try {
+      const decoded = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString());
+      credential = admin.credential.cert(decoded);
+    } catch (e) {
+      console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT:", e.message);
+    }
+  } else if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+    // If user provides individual components
+    credential = admin.credential.cert({
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    });
+  }
 
-const firebaseApp = initializeApp(firebaseConfig);
-const db = initializeFirestore(firebaseApp, {
-  experimentalForceLongPolling: true,
-});
+  admin.initializeApp({
+    credential,
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID
+  });
+}
 
-console.log("Firebase Client SDK Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
+const db = admin.firestore();
+console.log("Firebase Admin Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,10 +42,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const HYPERBEAM_API_KEY = process.env.HYPERBEAM_API_KEY;
-
-if (!HYPERBEAM_API_KEY && !process.env.VERCEL) {
-  console.warn("WARNING: HYPERBEAM_API_KEY is missing from environment. API will fail.");
-}
 
 app.use(cors());
 app.use(express.json());
@@ -61,9 +54,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api/debug-env', (req, res) => {
   res.json({
     hasProjectId: !!process.env.VITE_FIREBASE_PROJECT_ID,
-    hasApiKey: !!process.env.VITE_FIREBASE_API_KEY,
-    hasHyperbeam: !!process.env.HYPERBEAM_API_KEY,
-    nodeEnv: process.env.NODE_ENV,
+    hasServiceAccount: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_PRIVATE_KEY),
     vercel: !!process.env.VERCEL
   });
 });
@@ -78,80 +69,41 @@ const hyperbeamClient = axios.create({
 
 // Create a new room / Virtual Machine
 app.post('/api/room/create', async (req, res) => {
-  console.log("Room creation request received:", req.body);
-  
-  if (!HYPERBEAM_API_KEY) {
-    return res.status(500).json({ 
-      error: 'Configuration Error', 
-      message: 'HYPERBEAM_API_KEY is missing. Please add it to your environment variables.' 
-    });
-  }
-
   try {
     const { userId, userName } = req.body || {};
-    
-    let response;
-    try {
-      response = await hyperbeamClient.post('/vm', {
-        timeout: {
-          absolute: 7200, 
-          offline: 300 
-        }
-      });
-    } catch (hbError) {
-      console.error("HYPERBEAM API ERROR:", hbError.response?.data || hbError.message);
-      return res.status(hbError.response?.status || 500).json({
-        error: 'Hyperbeam API Error',
-        details: hbError.response?.data || hbError.message
-      });
-    }
+    const response = await hyperbeamClient.post('/vm', {
+      timeout: { absolute: 7200, offline: 300 }
+    });
     
     const roomId = response.data.session_id;
     const embedUrl = response.data.embed_url;
 
-    // Save to Firestore
-    try {
-      if (userId) {
-        await setDoc(doc(db, 'rooms', roomId), {
-          id: roomId,
-          userId, 
-          hostId: userId,
-          name: `${userName || 'User'}'s Anime Party`,
-          code: roomId,
-          participantsCount: 1,
-          activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
-          createdAt: new Date().toISOString()
-        });
-      }
-    } catch (dbError) {
-      console.error("Firestore Write Error:", dbError.message);
+    if (userId) {
+      await db.collection('rooms').doc(roomId).set({
+        id: roomId,
+        userId, 
+        hostId: userId,
+        name: `${userName || 'User'}'s Anime Party`,
+        code: roomId,
+        participantsCount: 1,
+        activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
+        createdAt: new Date().toISOString()
+      });
     }
 
-    res.json({
-      roomId: roomId,
-      embedUrl: embedUrl
-    });
+    res.json({ roomId: roomId, embedUrl: embedUrl });
   } catch (error) {
-    console.error("Unexpected Error in /api/room/create:", error);
-    res.status(500).json({ 
-      error: 'Internal Server Error',
-      message: error.message
-    });
+    console.error("Create Room Error:", error.message);
+    res.status(500).json({ error: 'Failed to create room', details: error.message });
   }
 });
 
 // Retrieve embed URL for an existing room
 app.get('/api/room/:id', async (req, res) => {
-  if (!HYPERBEAM_API_KEY) {
-    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing.' });
-  }
   try {
     const { id } = req.params;
     const response = await hyperbeamClient.get(`/vm/${id}`);
-    res.json({
-      roomId: response.data.session_id,
-      embedUrl: response.data.embed_url
-    });
+    res.json({ roomId: response.data.session_id, embedUrl: response.data.embed_url });
   } catch (error) {
     res.status(404).json({ error: 'Room not found or expired' });
   }
@@ -161,12 +113,12 @@ app.get('/api/room/:id', async (req, res) => {
 app.get('/api/users/:userId/rooms', async (req, res) => {
   try {
     const { userId } = req.params;
-    const q = query(collection(db, 'rooms'), where('userId', '==', userId), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    const userRooms = snapshot.docs.map(doc => doc.data());
-    res.json(userRooms);
+    const snapshot = await db.collection('rooms')
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .get();
+    res.json(snapshot.docs.map(doc => doc.data()));
   } catch (error) {
-    console.error("Fetch Rooms Error:", error);
     res.json([]); 
   }
 });
@@ -175,14 +127,11 @@ app.get('/api/users/:userId/rooms', async (req, res) => {
 app.get('/api/rooms/:roomId/messages', async (req, res) => {
   try {
     const { roomId } = req.params;
-    const q = query(
-      collection(db, 'rooms', roomId, 'messages'),
-      orderBy('createdAt', 'asc'),
-      limit(100)
-    );
-    const snapshot = await getDocs(q);
-    const messages = snapshot.docs.map(doc => doc.data());
-    res.json(messages);
+    const snapshot = await db.collection('rooms').doc(roomId).collection('messages')
+      .orderBy('createdAt', 'asc')
+      .limit(100)
+      .get();
+    res.json(snapshot.docs.map(doc => doc.data()));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch messages' });
   }
@@ -193,14 +142,8 @@ app.post('/api/rooms/:roomId/messages', async (req, res) => {
   try {
     const { roomId } = req.params;
     const msg = req.body;
-    
-    const newMessage = {
-      id: Date.now().toString(),
-      ...msg,
-      createdAt: new Date().toISOString()
-    };
-    
-    await addDoc(collection(db, 'rooms', roomId, 'messages'), newMessage);
+    const newMessage = { id: Date.now().toString(), ...msg, createdAt: new Date().toISOString() };
+    await db.collection('rooms').doc(roomId).collection('messages').add(newMessage);
     res.json(newMessage);
   } catch (error) {
     res.status(500).json({ error: 'Failed to send message' });
@@ -213,20 +156,15 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
     const { roomId } = req.params;
     const { userId, userName } = req.body;
     
-    const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
+    const roomRef = db.collection('rooms').doc(roomId);
+    const roomDoc = await roomRef.get();
     
-    if (!roomSnap.exists()) {
-      return res.status(200).json({ 
-        success: false, 
-        warning: 'Room not found in Firestore.',
-        participants: [] 
-      });
+    if (!roomDoc.exists) {
+      return res.status(200).json({ success: false, warning: 'Room not found.', participants: [] });
     }
 
-    const room = roomSnap.data();
+    const room = roomDoc.data();
     let participants = room.activeParticipants || [];
-    
     const pIndex = participants.findIndex(p => p.userId === userId);
     const now = new Date().toISOString();
 
@@ -235,39 +173,21 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
       participants[pIndex].userName = userName; 
       participants[pIndex].isHost = room.hostId === userId;
     } else {
-      participants.push({ 
-        userId, 
-        userName, 
-        lastSeen: now, 
-        isHost: room.hostId === userId 
-      });
+      participants.push({ userId, userName, lastSeen: now, isHost: room.hostId === userId });
     }
 
-    // Cleanup inactive users (15 seconds)
     const fifteenSecsAgo = new Date(Date.now() - 15000);
     participants = participants.filter(p => new Date(p.lastSeen) > fifteenSecsAgo);
     
-    // Check if host is active (30 seconds)
     const thirtySecsAgo = new Date(Date.now() - 30000);
     const isHostActive = participants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
 
-    await updateDoc(roomRef, {
-      activeParticipants: participants,
-      participantsCount: participants.length
-    });
+    await roomRef.update({ activeParticipants: participants, participantsCount: participants.length });
 
-    res.json({ 
-      success: true, 
-      participants: participants,
-      isHostActive 
-    });
+    res.json({ success: true, participants: participants, isHostActive });
   } catch (error) {
-    console.error("====== HEARTBEAT SYSTEM ERROR ======");
-    console.error("Error Message:", error.message);
-    res.status(500).json({ 
-      error: 'Heartbeat failed', 
-      details: error.message
-    });
+    console.error("Heartbeat System Error:", error.message);
+    res.status(500).json({ error: 'Heartbeat failed', details: error.message });
   }
 });
 
@@ -276,22 +196,17 @@ app.post('/api/rooms/:roomId/leave', async (req, res) => {
   try {
     const { roomId } = req.params;
     const { userId } = req.body;
+    const roomRef = db.collection('rooms').doc(roomId);
+    const roomDoc = await roomRef.get();
     
-    const roomRef = doc(db, 'rooms', roomId);
-    const roomSnap = await getDoc(roomRef);
-    
-    if (roomSnap.exists()) {
-      const room = roomSnap.data();
-      let participants = room.activeParticipants || [];
-      participants = participants.filter(p => p.userId !== userId);
+    if (roomDoc.exists) {
+      const room = roomDoc.data();
+      let participants = (room.activeParticipants || []).filter(p => p.userId !== userId);
       
       if (room.hostId === userId) {
-        await deleteDoc(roomRef);
+        await roomRef.delete();
       } else {
-        await updateDoc(roomRef, {
-          activeParticipants: participants,
-          participantsCount: participants.length
-        });
+        await roomRef.update({ activeParticipants: participants, participantsCount: participants.length });
       }
     }
     res.json({ success: true });
@@ -300,10 +215,8 @@ app.post('/api/rooms/:roomId/leave', async (req, res) => {
   }
 });
 
-// Export the app for Vercel
 export default app;
 
-// Listen locally
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`SyncAnime Backend running on http://localhost:${PORT}`);
