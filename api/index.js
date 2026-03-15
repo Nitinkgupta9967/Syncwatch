@@ -9,12 +9,17 @@ import admin from 'firebase-admin';
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
+  if (!projectId) {
+    console.error("CRITICAL ERROR: Firebase Project ID is missing from environment variables!");
+  }
   admin.initializeApp({
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID // Use existing client project ID
+    projectId: projectId
   });
 }
 
 const db = admin.firestore();
+console.log("Firebase Admin Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +38,15 @@ app.use(express.json());
 // Health check to verify API is alive
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), vercel: !!process.env.VERCEL });
+});
+
+app.get('/api/debug-env', (req, res) => {
+  res.json({
+    hasProjectId: !!(process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID),
+    hasHyperbeam: !!process.env.HYPERBEAM_API_KEY,
+    nodeEnv: process.env.NODE_ENV,
+    vercel: !!process.env.VERCEL
+  });
 });
 
 // Helper function to call Hyperbeam REST API
@@ -238,8 +252,17 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
       isHostActive 
     });
   } catch (error) {
-    console.error("Heartbeat Error:", error);
-    res.status(500).json({ error: 'Heartbeat failed' });
+    console.error("====== HEARTBEAT SYSTEM ERROR ======");
+    console.error("RoomId:", req.params.roomId);
+    console.error("Error Name:", error.name);
+    console.error("Error Message:", error.message);
+    if (error.stack) console.error("Stack:", error.stack);
+    
+    res.status(500).json({ 
+      error: 'Heartbeat failed', 
+      details: error.message,
+      code: error.code || 'UNKNOWN'
+    });
   }
 });
 
