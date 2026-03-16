@@ -1,40 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import admin from 'firebase-admin';
-
-// Initialize Firebase Admin with Service Account support
-if (!admin.apps.length) {
-  let credential = admin.credential.applicationDefault();
-  
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    // If user provides a base64 encoded service account JSON
-    try {
-      const decoded = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString());
-      credential = admin.credential.cert(decoded);
-    } catch (e) {
-      console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT:", e.message);
-    }
-  } else if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
-    // If user provides individual components
-    credential = admin.credential.cert({
-      projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    });
-  }
-
-  admin.initializeApp({
-    credential,
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID
-  });
-}
-
-const db = admin.firestore();
-console.log("Firebase Admin Initialized for Project:", process.env.VITE_FIREBASE_PROJECT_ID);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,21 +13,34 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const HYPERBEAM_API_KEY = process.env.HYPERBEAM_API_KEY;
 
+if (!HYPERBEAM_API_KEY && !process.env.VERCEL) {
+  console.warn("WARNING: HYPERBEAM_API_KEY is missing from environment. API will fail.");
+}
+
 app.use(cors());
 app.use(express.json());
+
+// Simplistic db.json setup - Using /tmp/ for Vercel Serverless compatibility
+const DB_FILE = process.env.VERCEL ? path.join('/tmp', 'db.json') : path.join(__dirname, 'db.json');
+console.log("DB_FILE Path:", DB_FILE);
 
 // Health check to verify API is alive
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), vercel: !!process.env.VERCEL });
 });
 
-app.get('/api/debug-env', (req, res) => {
-  res.json({
-    hasProjectId: !!process.env.VITE_FIREBASE_PROJECT_ID,
-    hasServiceAccount: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_PRIVATE_KEY),
-    vercel: !!process.env.VERCEL
-  });
-});
+// Helper functions for reading/writing our JSON database
+function readDB() {
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify({ rooms: [], messages: {} }));
+  }
+  const data = fs.readFileSync(DB_FILE, 'utf8');
+  return JSON.parse(data);
+}
+
+function writeDB(data) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
 
 // Helper function to call Hyperbeam REST API
 const hyperbeamClient = axios.create({
@@ -69,156 +52,212 @@ const hyperbeamClient = axios.create({
 
 // Create a new room / Virtual Machine
 app.post('/api/room/create', async (req, res) => {
+  console.log("Room creation request received:", req.body);
+  
+  if (!HYPERBEAM_API_KEY) {
+    console.error("CRITICAL: HYPERBEAM_API_KEY is missing.");
+    return res.status(500).json({ 
+      error: 'Configuration Error', 
+      message: 'HYPERBEAM_API_KEY is missing in Vercel settings. Please add it to your environment variables.' 
+    });
+  }
+
   try {
     const { userId, userName } = req.body || {};
-    const response = await hyperbeamClient.post('/vm', {
-      timeout: { absolute: 7200, offline: 300 }
-    });
+    
+    let response;
+    try {
+      // Basic settings for the new virtual browser
+      response = await hyperbeamClient.post('/vm', {
+        timeout: {
+          absolute: 7200, // 2 hours max
+          offline: 300 // 5 minutes empty shutdown
+        }
+      });
+    } catch (hbError) {
+      console.error("====== HYPERBEAM API ERROR ======");
+      console.error("Status:", hbError.response?.status);
+      console.error("Data:", hbError.response?.data);
+      return res.status(hbError.response?.status || 500).json({
+        error: 'Hyperbeam API Error',
+        details: hbError.response?.data || hbError.message
+      });
+    }
     
     const roomId = response.data.session_id;
     const embedUrl = response.data.embed_url;
 
-    if (userId) {
-      await db.collection('rooms').doc(roomId).set({
-        id: roomId,
-        userId, 
-        hostId: userId,
-        name: `${userName || 'User'}'s Anime Party`,
-        code: roomId,
-        participantsCount: 1,
-        activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
-        createdAt: new Date().toISOString()
-      });
+    // Save to our Local JSON Database if requested
+    try {
+      if (userId) {
+        const db = readDB();
+        db.rooms.push({
+          id: roomId,
+          userId, // Creator is the host
+          hostId: userId,
+          name: `${userName || 'User'}'s Anime Party`,
+          code: roomId,
+          participantsCount: 1,
+          activeParticipants: [{ userId, userName, lastSeen: new Date().toISOString(), isHost: true }],
+          createdAt: new Date().toISOString()
+        });
+        // initialize empty message array
+        db.messages[roomId] = [];
+        writeDB(db);
+      }
+    } catch (dbError) {
+      console.error("Database Write Error:", dbError.message);
+      // We don't necessarily want to fail the whole request if DB write fails, 
+      // but on Vercel /tmp might be tricky.
     }
 
-    res.json({ roomId: roomId, embedUrl: embedUrl });
+    res.json({
+      roomId: roomId,
+      embedUrl: embedUrl
+    });
   } catch (error) {
-    console.error("Create Room Error:", error.message);
-    res.status(500).json({ error: 'Failed to create room', details: error.message });
+    console.error("Unexpected Error in /api/room/create:", error);
+    res.status(500).json({ 
+      error: 'Internal Server Error',
+      message: error.message
+    });
   }
 });
 
 // Retrieve embed URL for an existing room
 app.get('/api/room/:id', async (req, res) => {
+  if (!HYPERBEAM_API_KEY) {
+    return res.status(500).json({ error: 'HYPERBEAM_API_KEY is missing in Vercel settings.' });
+  }
   try {
     const { id } = req.params;
+    
     const response = await hyperbeamClient.get(`/vm/${id}`);
-    res.json({ roomId: response.data.session_id, embedUrl: response.data.embed_url });
+    
+    res.json({
+      roomId: response.data.session_id,
+      embedUrl: response.data.embed_url
+    });
   } catch (error) {
+    console.error("Hyperbeam Get Error:", error.response?.data || error.message);
     res.status(404).json({ error: 'Room not found or expired' });
   }
 });
 
-// 1. Get recent rooms for a user
-app.get('/api/users/:userId/rooms', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const snapshot = await db.collection('rooms')
-      .where('userId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .get();
-    res.json(snapshot.docs.map(doc => doc.data()));
-  } catch (error) {
-    res.json([]); 
-  }
-});
+// JSON DB Routes
 
-// 2. Get messages for a room
-app.get('/api/rooms/:roomId/messages', async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const snapshot = await db.collection('rooms').doc(roomId).collection('messages')
-      .orderBy('createdAt', 'asc')
-      .limit(100)
-      .get();
-    res.json(snapshot.docs.map(doc => doc.data()));
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch messages' });
-  }
+// 1. Get recent rooms for a user
+app.get('/api/users/:userId/rooms', (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const userRooms = db.rooms.filter(r => r.userId === userId);
+  // Sort descending by creation date
+  userRooms.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(userRooms);
 });
 
 // 3. Post a message to a room
-app.post('/api/rooms/:roomId/messages', async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const msg = req.body;
-    const newMessage = { id: Date.now().toString(), ...msg, createdAt: new Date().toISOString() };
-    await db.collection('rooms').doc(roomId).collection('messages').add(newMessage);
-    res.json(newMessage);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to send message' });
+app.post('/api/rooms/:roomId/messages', (req, res) => {
+  const { roomId } = req.params;
+  const msg = req.body;
+  const db = readDB();
+  
+  if (!db.messages[roomId]) {
+    db.messages[roomId] = [];
   }
+  
+  const newMessage = {
+    id: Date.now().toString(),
+    ...msg,
+    createdAt: new Date().toISOString()
+  };
+  
+  db.messages[roomId].push(newMessage);
+  writeDB(db);
+  
+  res.json(newMessage);
 });
 
 // 4. Heartbeat / Join room
-app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const { userId, userName } = req.body;
-    
-    const roomRef = db.collection('rooms').doc(roomId);
-    const roomDoc = await roomRef.get();
-    
-    if (!roomDoc.exists) {
-      return res.status(200).json({ success: false, warning: 'Room not found.', participants: [] });
-    }
+app.post('/api/rooms/:roomId/heartbeat', (req, res) => {
+  const { roomId } = req.params;
+  const { userId, userName } = req.body;
+  const db = readDB();
+  
+  const room = db.rooms.find(r => r.id === roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const room = roomDoc.data();
-    let participants = room.activeParticipants || [];
-    const pIndex = participants.findIndex(p => p.userId === userId);
-    const now = new Date().toISOString();
+  if (!room.activeParticipants) room.activeParticipants = [];
+  
+  const pIndex = room.activeParticipants.findIndex(p => p.userId === userId);
+  const now = new Date().toISOString();
 
-    if (pIndex > -1) {
-      participants[pIndex].lastSeen = now;
-      participants[pIndex].userName = userName; 
-      participants[pIndex].isHost = room.hostId === userId;
-    } else {
-      participants.push({ userId, userName, lastSeen: now, isHost: room.hostId === userId });
-    }
-
-    const fifteenSecsAgo = new Date(Date.now() - 15000);
-    participants = participants.filter(p => new Date(p.lastSeen) > fifteenSecsAgo);
-    
-    const thirtySecsAgo = new Date(Date.now() - 30000);
-    const isHostActive = participants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
-
-    await roomRef.update({ activeParticipants: participants, participantsCount: participants.length });
-
-    res.json({ success: true, participants: participants, isHostActive });
-  } catch (error) {
-    console.error("Heartbeat System Error:", error.message);
-    res.status(500).json({ error: 'Heartbeat failed', details: error.message });
+  if (pIndex > -1) {
+    room.activeParticipants[pIndex].lastSeen = now;
+    room.activeParticipants[pIndex].userName = userName; 
+    room.activeParticipants[pIndex].isHost = room.hostId === userId; // Ensure host status is correct
+  } else {
+    room.activeParticipants.push({ 
+      userId, 
+      userName, 
+      lastSeen: now, 
+      isHost: room.hostId === userId 
+    });
   }
+
+  // Cleanup inactive users (haven't sent heartbeat in 15 seconds)
+  const fifteenSecsAgo = new Date(Date.now() - 15000);
+  room.activeParticipants = room.activeParticipants.filter(p => new Date(p.lastSeen) > fifteenSecsAgo);
+  room.participantsCount = room.activeParticipants.length;
+
+  // Cleanup room if host is gone for > 30 seconds
+  const thirtySecsAgo = new Date(Date.now() - 30000);
+  const isHostActive = room.activeParticipants.some(p => p.isHost && new Date(p.lastSeen) > thirtySecsAgo);
+  
+  if (!isHostActive && room.activeParticipants.length > 0) {
+    // Check if host ever existed/was seen recently
+    // If not active, we mark the room for deletion but usually vercel/serverless is stateless
+    // For this local DB implementation, we just filter it out in the next read or delete now
+    console.log(`Room ${roomId} host inactive. Room will be disbanded.`);
+    // db.rooms = db.rooms.filter(r => r.id !== roomId); // Uncomment for aggressive deletion
+  }
+
+  writeDB(db);
+  res.json({ 
+    success: true, 
+    participants: room.activeParticipants,
+    isHostActive 
+  });
 });
 
 // 5. Leave room explicitly
-app.post('/api/rooms/:roomId/leave', async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const { userId } = req.body;
-    const roomRef = db.collection('rooms').doc(roomId);
-    const roomDoc = await roomRef.get();
+app.post('/api/rooms/:roomId/leave', (req, res) => {
+  const { roomId } = req.params;
+  const { userId } = req.body;
+  const db = readDB();
+
+  const room = db.rooms.find(r => r.id === roomId);
+  if (room && room.activeParticipants) {
+    room.activeParticipants = room.activeParticipants.filter(p => p.userId !== userId);
+    room.participantsCount = room.activeParticipants.length;
     
-    if (roomDoc.exists) {
-      const room = roomDoc.data();
-      let participants = (room.activeParticipants || []).filter(p => p.userId !== userId);
-      
-      if (room.hostId === userId) {
-        await roomRef.delete();
-      } else {
-        await roomRef.update({ activeParticipants: participants, participantsCount: participants.length });
-      }
+    // If host leaves, disband
+    if (room.hostId === userId) {
+      db.rooms = db.rooms.filter(r => r.id !== roomId);
+      delete db.messages[roomId];
     }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Leave failed '});
+    
+    writeDB(db);
   }
+  res.json({ success: true });
 });
 
+// Export the app for Vercel Serverless execution
 export default app;
 
+// Listen locally if not in Vercel
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`SyncAnime Backend running on http://localhost:${PORT}`);
+    console.log(`SyncAnime Auth Backend running on http://localhost:${PORT}`);
   });
 }

@@ -15,37 +15,13 @@
   
   --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
   --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.08);
-  --shadow-glow: 0 0 20px var(--color-primary-glow);
   
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 18px;
-  --radius-xl: 24px;
   --radius-full: 999px;
   
-  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-[data-theme='light'] {
-  --color-bg: #fafafa;
-  --color-surface: #ffffff;
-  --color-border: #f1f1f5;
-  --color-text: #1e1e24;
-  --color-text-muted: #6b7280;
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.3);
-}
-
-[data-theme='dark'] {
-  --color-bg: #0a0a0c;
-  --color-surface: #121216;
-  --color-border: #22222a;
-  --color-text: #ffffff;
-  --color-text-muted: #94a3b8;
-  --glass-bg: rgba(18, 18, 22, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.05);
+  --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Global Component Styles */
@@ -95,7 +71,6 @@ body {
   color: var(--color-text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  transition: background-color var(--transition), color var(--transition);
 }
 
 h1, h2, h3, h4 {
