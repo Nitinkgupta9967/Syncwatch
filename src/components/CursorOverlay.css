@@ -1,0 +1,52 @@
+/* Cursor Overlay Styling */
+.cursor-overlay-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60; /* Above video and most UI */
+  overflow: hidden;
+}
+
+.remote-cursor {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  transition: all 0.1s linear; /* Smooth movement but highly responsive */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.cursor-pointer {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 12px 0 0 12px;
+  /* borderColor is set dynamically */
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+}
+
+.cursor-label {
+  margin-top: 4px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.cursor-ripple {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border: 2px solid white;
+  border-radius: 50%;
+  animation: ripple-out 0.6s ease-out forwards;
+}
+
+@keyframes ripple-out {
+  from { transform: scale(0.5); opacity: 0.8; }
+  to { transform: scale(2); opacity: 0; }
+}

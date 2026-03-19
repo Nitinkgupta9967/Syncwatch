@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, History, Users, Home, Settings, LogOut, Menu, X, Search } from 'lucide-react';
+import { 
+  Plus, History, Users, Home, Settings, LogOut, 
+  Menu, Search, Moon, Sun, Sparkles, Clipboard 
+} from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 import './DashboardPage.css';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [joinCode, setJoinCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [previousRooms, setPreviousRooms] = useState<any[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 768);
 
   const API_URL = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
@@ -65,6 +70,25 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
+  const handleEndSession = async (e: React.MouseEvent, roomId: string) => {
+    e.stopPropagation();
+    if (!user || !window.confirm('Are you sure you want to end this session? It will be deleted for everyone.')) return;
+    
+    try {
+      const res = await fetch(`${API_URL}/api/rooms/${roomId}?userId=${user.uid}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setPreviousRooms(prev => prev.filter(r => r.id !== roomId));
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to end session');
+      }
+    } catch (err) {
+      alert('Network error');
+    }
+  };
+
   const handleJoinRoom = (e: React.FormEvent) => {
     e.preventDefault();
     if (joinCode.trim()) {
@@ -77,35 +101,69 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className={`dashboard-layout ${isSidebarOpen ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
+      {/* Ambient Background Elements */}
+      <div className="bg-ambient-shapes">
+        <div className="shape-1"></div>
+        <div className="shape-2"></div>
+      </div>
+
+      {/* Mobile Sidebar Overlay */}
+      <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)}></div>
+
       {/* Sidebar */}
       <aside className="dashboard-sidebar glass-card">
         <div className="sidebar-header">
-          <div className="sidebar-logo">
-            <span className="logo-icon">✨</span>
-            <span className="logo-text">SyncAnime</span>
+          <div className="sidebar-logo-group">
+            <div className="sidebar-logo">
+              <span className="logo-icon">✨</span>
+              {isSidebarOpen && <span className="logo-text">SyncAnime</span>}
+            </div>
+            <button 
+              className="sidebar-toggle-v3" 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            >
+              <Menu size={18} />
+            </button>
           </div>
-          <button className="sidebar-toggle" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
         </div>
 
         <nav className="sidebar-nav">
-          <button className="nav-item active"><Home size={20} /> <span>Home</span></button>
-          <button className="nav-item" onClick={handleCreateRoom}><Plus size={20} /> <span>Create Room</span></button>
-          <button className="nav-item" onClick={() => navigate('#history')}><History size={20} /> <span>History</span></button>
-          <button className="nav-item"><Settings size={20} /> <span>Settings</span></button>
+          <button className={`nav-item ${!isSidebarOpen ? 'compact' : ''} active`}>
+            <div className="active-indicator"></div>
+            <Home size={20} /> {isSidebarOpen && <span>Home</span>}
+          </button>
+          <button className={`nav-item ${!isSidebarOpen ? 'compact' : ''}`} onClick={handleCreateRoom}>
+            <div className="active-indicator"></div>
+            <Plus size={20} /> {isSidebarOpen && <span>Create Room</span>}
+          </button>
+          <button className={`nav-item ${!isSidebarOpen ? 'compact' : ''}`} onClick={() => navigate('#history')}>
+            <div className="active-indicator"></div>
+            <History size={20} /> {isSidebarOpen && <span>History</span>}
+          </button>
+          <button className={`nav-item ${!isSidebarOpen ? 'compact' : ''}`}>
+            <div className="active-indicator"></div>
+            <Settings size={20} /> {isSidebarOpen && <span>Settings</span>}
+          </button>
         </nav>
 
         <div className="sidebar-footer">
-          <div className="user-pill glass-card">
-            <div className="user-avatar">{user?.email?.charAt(0).toUpperCase()}</div>
-            <div className="user-info">
-              <p className="u-name">{user?.displayName || 'User'}</p>
-              <p className="u-email">{user?.email}</p>
+          <div className={`user-profile-v3 ${!isSidebarOpen ? 'compact' : ''} glass-card`}>
+            <div className="user-avatar-glow">
+              {user?.email?.charAt(0).toUpperCase()}
+              <div className="status-indicator-online"></div>
             </div>
-            <button className="logout-btn" onClick={logout} title="Sign Out">
-              <LogOut size={18} />
-            </button>
+            {isSidebarOpen && (
+              <div className="user-info">
+                <p className="u-name">{user?.displayName || 'User'}</p>
+                <p className="u-email">{user?.email}</p>
+              </div>
+            )}
+            {isSidebarOpen && (
+              <button className="logout-btn-subtle" onClick={logout} title="Sign Out">
+                <LogOut size={18} />
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -113,43 +171,60 @@ export const DashboardPage: React.FC = () => {
       {/* Main Content */}
       <main className="dashboard-main">
         <header className="main-header">
+          <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(true)}>
+            <Menu size={24} />
+          </button>
+
           <div className="search-bar glass-card">
             <Search size={18} />
             <input placeholder="Search for rooms or friends..." />
+          </div>
+
+          <div className="header-actions">
+            <button className="theme-toggle-btn glass-card" onClick={toggleTheme} title="Toggle Theme">
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
           </div>
         </header>
 
         <div className="main-canvas animate-fade-in">
           <div className="welcome-banner glass-card">
             <div className="banner-content">
-              <h1>Welcome, <span className="text-highlight">{user?.displayName || user?.email?.split('@')[0]}</span></h1>
-              <p>Host an anime party and watch with friends in sub-second sync.</p>
-              <button className="btn-primary" onClick={handleCreateRoom} disabled={isLoading}>
-                Start New Watch Party <Plus size={20} />
+              <div className="banner-badge">NEW SEASON 🎉</div>
+              <h1>Welcome back 👋, <span className="text-highlight">{user?.displayName || user?.email?.split('@')[0]}</span></h1>
+              <p className="banner-subtitle">Host an anime party and watch with friends in sub-second sync.</p>
+              <button className="btn-primary-glow" onClick={handleCreateRoom} disabled={isLoading}>
+                Start New Watch Party <Plus size={22} />
               </button>
             </div>
-            <div className="banner-visual desktop-only">🍿</div>
+            <div className="banner-visual desktop-only">
+              <Sparkles size={80} className="floating-sparkle" />
+              <div className="popcorn-emoji">🍿</div>
+            </div>
           </div>
 
           <div className="dashboard-grid">
-            <section className="join-section">
+            <section className="join-section animate-slide-up">
               <div className="card-header">
                 <h3>Join via Code</h3>
               </div>
-              <form className="join-input-box glass-card" onSubmit={handleJoinRoom}>
-                <input 
-                  placeholder="Paste room link or code..." 
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                />
-                <button type="submit" disabled={!joinCode.trim()}>Join</button>
+              <form className="join-pill-container glass-card" onSubmit={handleJoinRoom}>
+                <div className="input-with-icon">
+                  <Clipboard size={18} className="input-icon-left" />
+                  <input 
+                    placeholder="Paste room link or code..." 
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value)}
+                  />
+                </div>
+                <button type="submit" className="join-submit-btn" disabled={!joinCode.trim()}>Join Party</button>
               </form>
             </section>
 
-            <section className="history-section" id="history">
+            <section className="history-section full-width animate-slide-up" style={{ animationDelay: '0.1s' }} id="history">
               <div className="card-header">
                 <h3>Recent Parties</h3>
-                <span>{previousRooms.length} sessions</span>
+                <span className="party-count-badge">{previousRooms.length} sessions</span>
               </div>
 
               <div className="room-history-list">
@@ -157,19 +232,30 @@ export const DashboardPage: React.FC = () => {
                   previousRooms.map((room) => (
                     <div key={room.id} className="history-card glass-card" onClick={() => navigate(`/room/${room.code}`)}>
                       <div className="h-card-top">
-                        <div className="h-icon"><Users size={16} /></div>
+                        <div className="h-icon-glow"><Users size={16} /></div>
                         <span className="h-count">{room.participantsCount || 0} watching</span>
                       </div>
                       <h4>{room.name || 'Anime Party'}</h4>
                       <div className="h-card-footer">
                         <span>{room.date}</span>
-                        <button className="h-join-btn">Resume</button>
+                        <div className="h-card-actions">
+                          <button className="h-resume-btn">Resume</button>
+                          {user && room.hostId === user.uid && (
+                            <button className="h-end-btn" onClick={(e) => handleEndSession(e, room.id)}>
+                              End Session
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="empty-history glass-card">
-                    <p>No parties yet. Time to start one! 🎥</p>
+                  <div className="empty-history-premium glass-card">
+                    <div className="empty-visual">🎬</div>
+                    <p>No watch parties yet. Start your first sync party 🎉</p>
+                    <button className="btn-ghost-premium" onClick={handleCreateRoom}>
+                      Start Now
+                    </button>
                   </div>
                 )}
               </div>

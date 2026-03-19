@@ -1,9 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Play, Users, MessageCircle, Plus, History as HistoryIcon, Tv } from 'lucide-react';
+import { Play, Users, MessageCircle, Plus, History as HistoryIcon, Tv, Sun, Moon } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 import './LandingPage.css';
 
 export const LandingPage: React.FC = () => {
+  const { theme, toggleTheme } = useTheme();
   return (
     <div className="landing-page">
       <div className="blob-container">
@@ -22,6 +24,9 @@ export const LandingPage: React.FC = () => {
             <a href="#how">How it works</a>
           </div>
           <div className="nav-auth">
+            <button className="theme-toggle-landing" onClick={toggleTheme} title="Toggle Theme">
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
             <Link to="/auth" className="login-link">Login</Link>
             <Link to="/auth?signup=true" className="btn-get-started">Get Started</Link>
           </div>

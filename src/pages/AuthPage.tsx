@@ -4,6 +4,8 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   updateProfile
 } from 'firebase/auth';
@@ -23,6 +25,21 @@ export const AuthPage: React.FC = () => {
   const [error, setError] = useState('');
   
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    const checkRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          navigate('/dashboard');
+        }
+      } catch (err: any) {
+        console.error("Redirect Result Error:", err);
+        setError(err.message || 'Failed to complete Google Sign-in');
+      }
+    };
+    checkRedirect();
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,8 +69,8 @@ export const AuthPage: React.FC = () => {
     setError('');
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
-      navigate('/dashboard');
+      // Use redirect instead of popup to avoid COOP issues
+      await signInWithRedirect(auth, provider);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Failed to authenticate with Google');
